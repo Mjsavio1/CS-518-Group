@@ -1,5 +1,3 @@
->Prompt: I am working to develop an app. The idea of the app is to connect users with smaller artists based off their current listening history and using Spotifys Api. Please develop a vision, epics, and user stories.
-
 **Vision Statement:** To help music listeners discover and meaningfully support smaller, emerging artists by intelligently connecting them with artists who align with their real listening habits.
 
 - **Epic 1:** Spotify Integration & Authentication: Enable users to securely connect their Spotify account and allow the app to access listening data.
