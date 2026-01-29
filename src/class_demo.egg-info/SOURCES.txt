@@ -1,0 +1,6 @@
+pyproject.toml
+src/class_demo.egg-info/PKG-INFO
+src/class_demo.egg-info/SOURCES.txt
+src/class_demo.egg-info/dependency_links.txt
+src/class_demo.egg-info/top_level.txt
+tests/test_example.py

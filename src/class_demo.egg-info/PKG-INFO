@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: class_demo
+Version: 0.1.0
+Summary: User management and authentication service
+Author: User Service Team
+Requires-Python: >=3.11
