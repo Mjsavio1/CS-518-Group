@@ -24,3 +24,33 @@ Learn from user behavior
 Explain recommendations clearly and ethically
 8. Notification / Delivery Service
 Deliver recommendations at the right time
+
+## Microservices Architecture Diagram
+
+In a microservices architecture, each major capability of the system is deployed as an independent service with its own responsibilities and data boundaries. Services communicate over APIs and can be scaled independently.
+
+### Services
+
+**Authentication & Account Service**
+Handles user registration, authentication, OAuth flow, and session management.
+
+**Spotify Integration Service**
+Communicates with the Spotify API, manages tokens, and normalizes Spotify data into internal models.
+
+**Listening Analysis Service**
+Processes listening history data and derives insights such as genre affinity and listening patterns.
+
+**Artist Discovery & Recommendation Service**
+Generates personalized recommendations based on analyzed listening data.
+
+**Artist Metadata Service**
+Stores and serves enriched artist information such as genre, popularity, and biography.
+
+**User Preference & Feedback Service**
+Tracks user interactions (likes, skips) to improve recommendation quality over time.
+
+**Transparency & Explanation Service**
+Provides clear explanations for why a recommendation was made.
+
+**Notification / Delivery Service**
+Delivers recommendations via in-app notifications or scheduled updates.

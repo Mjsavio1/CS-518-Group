@@ -4,11 +4,45 @@
 
 ## Entities
 
-User
-Spotify Account-User's connected Spotify data
-Listening History Item-Song the user has listened to previously
-Reccomendation-Song reccomended to user
+### User
+Represents a user of the application.
+- user_id (PK)
+- email
+- display_name
+- created_at
+
+### SpotifyAccount
+Represents a connected Spotify account for a user.
+- spotify_account_id (PK)
+- spotify_user_id
+- access_token
+- refresh_token
+- token_expiration
+- user_id (FK)
+
+### ListeningHistoryItem
+Represents a song the user has listened to.
+- history_item_id (PK)
+- track_id
+- artist_id
+- listened_at
+- spotify_account_id (FK)
+
+### Recommendation
+Represents a song or artist recommended to the user.
+- recommendation_id (PK)
+- track_id
+- artist_id
+- generated_at
+- explanation
+- user_id (FK)
 
 ## Relationships
 
-User connects their Spotify account. Their account data contains listening history items, ie the songs they've listened to previously. Based on patterns in listening history items, a reccomendation is selected that aligns with the user's listening patterns.
+- A User connects to exactly one SpotifyAccount.
+- A SpotifyAccount contains many ListeningHistoryItems.
+- Each ListeningHistoryItem belongs to one SpotifyAccount.
+- A User can receive many Recommendations.
+- Each Recommendation is generated for exactly one User.
+
+Listening history data is analyzed to identify patterns in user preferences such as genre affinity and listening behavior. These insights are used to generate personalized recommendations, with an emphasis on smaller or emerging artists.
