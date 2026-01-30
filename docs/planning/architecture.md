@@ -1,40 +1,9 @@
-# Monolithic Architecture Diagram
+# Architecture Diagrams
 
-```mermaid
-graph TD
-    User[User / Mobile or Web App]
+## Monolithic Architecture Diagram
 
-    subgraph Monolith["Monolithic Backend Application"]
-        Auth[Authentication & Account Service]
-        Spotify[Spotify Integration Service]
-        Analysis[Listening Analysis Service]
-        Discovery[Artist Discovery & Recommendation Service]
-        Metadata[Artist Metadata Service]
-        Feedback[User Preference & Feedback Service]
-        Explain[Transparency & Explanation Service]
-        Notify[Notification / Delivery Service]
-    end
+[![](https://mermaid.ink/img/pako:eNqFVN9v2jAQ_lcsP0ytRCmEX2keJmVjk5BKhUa3SUv6YJIDLBI7cpKuFPjfd05iQoBqeXBsf_ed77473Y4GMgTq0JViyZo8j31B8PuZgvL0Qu7JVC54BEQq8hsWxE2SF1-UVmm-KGlTKWTEs7XnU7PlAfnCgg2IUFMiHrCMS-HTl5KqPzdHhl5AZBVOPhE3CGQuMjIH9coDOLGfJzLjy61X_clEZIDvF7xLa1ewaJvy1HvkaQaCi9Xx6or1mKeBfAW19VyVIaG-wJB-QCDjGFP56K0pZAxBZsjmfMX0O0C4QGFKdWcKlqBABIDPGOgK69tbEjEuvGfFRJowzdCBFdfio6ieSrmKn9H3nowh4kVeTQJmZ8pa6evOJt6N0boo_WxyW1mPMbkFS8G7OSnu8fb22CFFknd3n_ePcsX163ih-2FfFP_M5heHv2dap_u6EOce-QbQ4XzD0ZuR7prHqiYzJZfYx-jRVMcEqUPR5ibxhgqnAApwiZmmqnyZFtPQWeh1S2mwjuISq8pdQse2-K_Lpyr8s7RMWa5F2ICa3prYsaUvoWaADeip1skAtIWzhofUyVQOLRqDipk-0p2m-BTHQQw-dXAbMrXxqS8OyEmY-CNlbGhK5qs1dZYsSvGUJxgajDnDcVCbYBOB-qqHCXUeCg_U2dE36liDdrfTtXvdfm_YHYwsa9SiW-rYVtu2H-yh1Rl2Bv2hbR9a9L14s9MeDbqDvtXr4WLZveGgRSHkmVTTcnoWQ_TwD3lZuJ0?type=png)](https://mermaid.live/edit#pako:eNqFVN9v2jAQ_lcsP0ytRCmEX2keJmVjk5BKhUa3SUv6YJIDLBI7cpKuFPjfd05iQoBqeXBsf_ed77473Y4GMgTq0JViyZo8j31B8PuZgvL0Qu7JVC54BEQq8hsWxE2SF1-UVmm-KGlTKWTEs7XnU7PlAfnCgg2IUFMiHrCMS-HTl5KqPzdHhl5AZBVOPhE3CGQuMjIH9coDOLGfJzLjy61X_clEZIDvF7xLa1ewaJvy1HvkaQaCi9Xx6or1mKeBfAW19VyVIaG-wJB-QCDjGFP56K0pZAxBZsjmfMX0O0C4QGFKdWcKlqBABIDPGOgK69tbEjEuvGfFRJowzdCBFdfio6ieSrmKn9H3nowh4kVeTQJmZ8pa6evOJt6N0boo_WxyW1mPMbkFS8G7OSnu8fb22CFFknd3n_ePcsX163ih-2FfFP_M5heHv2dap_u6EOce-QbQ4XzD0ZuR7prHqiYzJZfYx-jRVMcEqUPR5ibxhgqnAApwiZmmqnyZFtPQWeh1S2mwjuISq8pdQse2-K_Lpyr8s7RMWa5F2ICa3prYsaUvoWaADeip1skAtIWzhofUyVQOLRqDipk-0p2m-BTHQQw-dXAbMrXxqS8OyEmY-CNlbGhK5qs1dZYsSvGUJxgajDnDcVCbYBOB-qqHCXUeCg_U2dE36liDdrfTtXvdfm_YHYwsa9SiW-rYVtu2H-yh1Rl2Bv2hbR9a9L14s9MeDbqDvtXr4WLZveGgRSHkmVTTcnoWQ_TwD3lZuJ0)
 
-    SpotifyAPI[(Spotify Web API)]
-    Database[(Application Database)]
+## Modular Monolithic Architecture Diagram
 
-    User -->|Login / Use App| Auth
-    User -->|View Recommendations| Discovery
-    User -->|Like / Skip| Feedback
-    User -->|View Artist Profiles| Metadata
-
-    Auth --> Spotify
-    Spotify --> SpotifyAPI
-    Spotify --> Analysis
-    Analysis --> Discovery
-    Discovery --> Metadata
-    Discovery --> Explain
-    Feedback --> Discovery
-    Discovery --> Notify
-
-    Auth --> Database
-    Analysis --> Database
-    Discovery --> Database
-    Metadata --> Database
-    Feedback --> Database
-    Notify --> Database
+[![](https://mermaid.ink/img/pako:eNqdVl1P2zAU_SuWJRBIhfUDSJqHSR3dJCSYEDBNWsODm16KRWpHdoooiP8-24kTO3H3sD4gcu85zr3n3pzkA2d8BTjBa0GKZ_QwTxlSv18SxEL_QV_QZU6BlWhWFI8pq9IHB-iSs1LwPFeQa7IDUSXkdlkd1KblIsU9MH6s8Po325bPLWChLx26A5xTmfFXEDsH3cTClJkoqSzd000gDP4BsFqS7MWB21CfAGzlqHEP4pVmEJSizmkdPBg6-raVlIGU6JqvaXbcU6WGG0nUCGhGSsoZOkSzLONbNZMa4NDuC17Sp51l1pfoipWgqjH0PmnGSL6TVFrWtZIIGGXrJhMgNco3VVbSthM5RHeQ8c1GSbXvzjdQEpUknTNsOMCwE7EMs6S3Ap5AAFPSHjaIAPn7W5ETyiz3QRAmC6KJulqTZftK_amVrEdgD3BjHYq_H3dQcElLrlQJrUiTpmZNemh3MXTDGlB13kIdSDM_g2unOdeSBhmV7gZejyAI8-dp4J0RB2l2IobQjKcHdSTTlS6JhMWRsp3cKmyjxzWh3u7Z7dXiyG76b1giFTh2vcoodfLVNaXW5tCJyvge1EkGfKdL79hMJ903lqCRSl2jdYsq79fVlFqDaq365flle-huqQbaeQwrZL9qr5kG2zPBtou2iSank55HeaMMwNQw90I6xlXfzg_-Q4tudL8WQaTvJr5o_3nzgMn0BTZ74lpGWGZrFPtV8XyignW6d7a7xQQr71vDfkFcPwiZJK1atI97-zRpRCWpl_L6COTbBgLJfuEBkFtxJ40H6tuJrnBSii0M8AbEhuhL_KGpKVav7g2kOFH_roh4SXHKPhWnIOwP5xtLE3y7fsbJE8mlutoWqhqYU6JeDy1E1QjiUr_4cTKOzRE4-cBvOJmMTyfDaTy8iMeTaDI8iwZ4p6Lnp9HoPL4Yj6Oz0cV0Ov4c4Hdzz-FpPDyL4ygaDaNoMj0fDTCstPI31ceg-Sb8_AtNMmkS?type=png)](https://mermaid.live/edit#pako:eNqdVl1P2zAU_SuWJRBIhfUDSJqHSR3dJCSYEDBNWsODm16KRWpHdoooiP8-24kTO3H3sD4gcu85zr3n3pzkA2d8BTjBa0GKZ_QwTxlSv18SxEL_QV_QZU6BlWhWFI8pq9IHB-iSs1LwPFeQa7IDUSXkdlkd1KblIsU9MH6s8Po325bPLWChLx26A5xTmfFXEDsH3cTClJkoqSzd000gDP4BsFqS7MWB21CfAGzlqHEP4pVmEJSizmkdPBg6-raVlIGU6JqvaXbcU6WGG0nUCGhGSsoZOkSzLONbNZMa4NDuC17Sp51l1pfoipWgqjH0PmnGSL6TVFrWtZIIGGXrJhMgNco3VVbSthM5RHeQ8c1GSbXvzjdQEpUknTNsOMCwE7EMs6S3Ap5AAFPSHjaIAPn7W5ETyiz3QRAmC6KJulqTZftK_amVrEdgD3BjHYq_H3dQcElLrlQJrUiTpmZNemh3MXTDGlB13kIdSDM_g2unOdeSBhmV7gZejyAI8-dp4J0RB2l2IobQjKcHdSTTlS6JhMWRsp3cKmyjxzWh3u7Z7dXiyG76b1giFTh2vcoodfLVNaXW5tCJyvge1EkGfKdL79hMJ903lqCRSl2jdYsq79fVlFqDaq365flle-huqQbaeQwrZL9qr5kG2zPBtou2iSank55HeaMMwNQw90I6xlXfzg_-Q4tudL8WQaTvJr5o_3nzgMn0BTZ74lpGWGZrFPtV8XyignW6d7a7xQQr71vDfkFcPwiZJK1atI97-zRpRCWpl_L6COTbBgLJfuEBkFtxJ40H6tuJrnBSii0M8AbEhuhL_KGpKVav7g2kOFH_roh4SXHKPhWnIOwP5xtLE3y7fsbJE8mlutoWqhqYU6JeDy1E1QjiUr_4cTKOzRE4-cBvOJmMTyfDaTy8iMeTaDI8iwZ4p6Lnp9HoPL4Yj6Oz0cV0Ov4c4Hdzz-FpPDyL4ygaDaNoMj0fDTCstPI31ceg-Sb8_AtNMmkS)
