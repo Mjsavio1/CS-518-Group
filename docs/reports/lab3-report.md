@@ -36,8 +36,9 @@ Tests are implemented in [tests/user_service/test_mapper.py](tests/user_service/
 - Work performed: created Pydantic models, implemented a small `Mapper`, and added focused unit tests for mapping behavior.
 
 **Verification**
-- Tests cover the three mapping directions described above. If any tests fail, adjust model field names or mapping logic accordingly and re-run `pytest`.
-
-**Notes / Next steps**
-- Optionally replace password-hashing stub with a real hasher and add integration tests against the repository layer.
-- Push changes to your branch and create a merge request per course workflow.
+- Unit tests in `tests/user_service/test_mapper.py` cover the mapping directions and basic validation:
+	- Dict -> `UserCreate`: ensures required fields are present and invalid `role` values raise validation errors.
+	- `UserCreate` -> DB document: ensures the plain `password` is removed and a `hashed_password` key is produced while preserving other fields.
+	- DB document -> `UserRead`: ensures `_id` is mapped to `id`, `hashed_password` is omitted, and public fields (`email`, `username`, `role`) are preserved.
+- Edge cases covered: missing required fields (expect validation errors), extra/unexpected fields (ignored), and invalid role values.
+- If a test fails, you can re-inspect the mapping functions in `src/class_demo/user_service/mapper.py`
