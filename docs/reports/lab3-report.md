@@ -42,3 +42,8 @@ Tests are implemented in [tests/user_service/test_mapper.py](tests/user_service/
 	- DB document -> `UserRead`: ensures `_id` is mapped to `id`, `hashed_password` is omitted, and public fields (`email`, `username`, `role`) are preserved.
 - Edge cases covered: missing required fields (expect validation errors), extra/unexpected fields (ignored), and invalid role values.
 - If a test fails, you can re-inspect the mapping functions in `src/class_demo/user_service/mapper.py`
+
+**Reflection/Discussion**
+-In this lab, we worked together to design the models, implement the mapper functions, and create the tests, we shared responsibilities and reviewed each other’s work. This approach helped us better understand how separating models and mapping logic keeps our data organized.
+
+-We can and will apply the same ideas to our music app by using models and mappers to manage user accounts, music prefrences, and song data. Keeping these layers structured will make it easier to convert data between the application, database, and user interface.
