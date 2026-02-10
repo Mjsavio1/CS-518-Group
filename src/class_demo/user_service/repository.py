@@ -2,9 +2,12 @@
 
 from typing import Dict, List, Optional, Any
 import uuid
+from pymongo.collection import Collection
+from pymongo.errors import DuplicateKeyError, OperationFailure
+from bson.objectid import ObjectId
 from .models import User
 from .mapper import db_to_model, model_to_db
-from .exceptions import (
+from .repository_exceptions import (
     DuplicateUsernameError,
     DuplicateEmailError,
     UserNotFoundError,
@@ -16,22 +19,36 @@ from .exceptions import (
 class UserRepository:
     """Repository class for managing User database operations.
     
-    This class abstracts database operations and provides a clean interface
+    This class abstracts MongoDB database operations and provides a clean interface
     for CRUD operations on User entities. It handles validation and raises
     appropriate custom exceptions for error cases.
     """
 
-    def __init__(self):
-        """Initialize the repository with an in-memory storage.
+    def __init__(self, collection: Collection):
+        """Initialize the repository with a MongoDB collection.
         
-        In a production environment, this would be replaced with actual
-        database connection (MongoDB, PostgreSQL, etc.)
+        Args:
+            collection: PyMongo collection instance for users.
+            
+        Raises:
+            RepositoryError: If collection is invalid.
         """
-        # In-memory storage for demo purposes
-        self._storage: Dict[str, Dict[str, Any]] = {}
-        # Indexes for quick lookups by username and email
-        self._username_index: Dict[str, str] = {}  # username -> id
-        self._email_index: Dict[str, str] = {}  # email -> id
+        if not collection:
+            raise RepositoryError("Collection cannot be None")
+        
+        self._collection = collection
+        self._setup_indexes()
+
+    def _setup_indexes(self) -> None:
+        """Create database indexes for efficient queries.
+        
+        Creates unique indexes on username and email fields.
+        """
+        try:
+            self._collection.create_index("username", unique=True)
+            self._collection.create_index("email", unique=True)
+        except Exception as e:
+            raise RepositoryError(f"Failed to create indexes: {str(e)}")
 
     def create(self, user: User) -> User:
         """Create a new user in the database.
@@ -49,14 +66,6 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            # Check for duplicate username
-            if user.username in self._username_index:
-                raise DuplicateUsernameError(user.username)
-            
-            # Check for duplicate email
-            if user.email in self._email_index:
-                raise DuplicateEmailError(user.email)
-            
             # Assign ID if not present
             if not user.id:
                 user.id = str(uuid.uuid4())
@@ -64,16 +73,24 @@ class UserRepository:
             # Convert to database document format
             doc = model_to_db(user)
             
-            # Store in database
-            self._storage[user.id] = doc
-            self._username_index[user.username] = user.id
-            self._email_index[user.email] = user.id
+            # Insert into database
+            result = self._collection.insert_one(doc)
+            user.id = str(result.inserted_id)
             
             return user
             
-        except (DuplicateUsernameError, DuplicateEmailError):
-            raise
+        except DuplicateKeyError as e:
+            # Determine which field caused the duplicate
+            error_msg = str(e)
+            if "username" in error_msg:
+                raise DuplicateUsernameError(user.username)
+            elif "email" in error_msg:
+                raise DuplicateEmailError(user.email)
+            else:
+                raise RepositoryError(f"Duplicate key error: {error_msg}")
         except Exception as e:
+            if isinstance(e, (DuplicateUsernameError, DuplicateEmailError)):
+                raise
             raise RepositoryError(f"Failed to create user: {str(e)}")
 
     def read(self, user_id: str) -> User:
@@ -90,10 +107,17 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            if user_id not in self._storage:
+            # Convert string ID to ObjectId if needed
+            try:
+                obj_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            except Exception:
+                obj_id = user_id
+            
+            doc = self._collection.find_one({"_id": obj_id})
+            
+            if not doc:
                 raise UserNotFoundError(user_id=user_id)
             
-            doc = self._storage[user_id]
             return db_to_model(doc)
             
         except UserNotFoundError:
@@ -115,11 +139,12 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            if username not in self._username_index:
+            doc = self._collection.find_one({"username": username})
+            
+            if not doc:
                 raise UserNotFoundError(username=username)
             
-            user_id = self._username_index[username]
-            return self.read(user_id)
+            return db_to_model(doc)
             
         except UserNotFoundError:
             raise
@@ -140,11 +165,12 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            if email not in self._email_index:
+            doc = self._collection.find_one({"email": email})
+            
+            if not doc:
                 raise UserNotFoundError(email=email)
             
-            user_id = self._email_index[email]
-            return self.read(user_id)
+            return db_to_model(doc)
             
         except UserNotFoundError:
             raise
@@ -168,34 +194,37 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
+            # Convert string ID to ObjectId if needed
+            try:
+                obj_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            except Exception:
+                obj_id = user_id
+            
             # Check if user exists
-            if user_id not in self._storage:
+            existing_doc = self._collection.find_one({"_id": obj_id})
+            if not existing_doc:
                 raise UserNotFoundError(user_id=user_id)
             
-            existing = db_to_model(self._storage[user_id])
+            existing = db_to_model(existing_doc)
             
             # Check for duplicate username if changed
             if user.username != existing.username:
-                if user.username in self._username_index:
+                duplicate_user = self._collection.find_one({"username": user.username})
+                if duplicate_user:
                     raise DuplicateUsernameError(user.username)
-                # Update index
-                del self._username_index[existing.username]
-                self._username_index[user.username] = user_id
             
             # Check for duplicate email if changed
             if user.email != existing.email:
-                if user.email in self._email_index:
+                duplicate_user = self._collection.find_one({"email": user.email})
+                if duplicate_user:
                     raise DuplicateEmailError(user.email)
-                # Update index
-                del self._email_index[existing.email]
-                self._email_index[user.email] = user_id
             
             # Ensure ID consistency
             user.id = user_id
             
-            # Store updated document
+            # Convert to database document format and update
             doc = model_to_db(user)
-            self._storage[user_id] = doc
+            self._collection.replace_one({"_id": obj_id}, doc)
             
             return user
             
@@ -215,16 +244,16 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            if user_id not in self._storage:
+            # Convert string ID to ObjectId if needed
+            try:
+                obj_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            except Exception:
+                obj_id = user_id
+            
+            result = self._collection.delete_one({"_id": obj_id})
+            
+            if result.deleted_count == 0:
                 raise UserNotFoundError(user_id=user_id)
-            
-            doc = self._storage[user_id]
-            user = db_to_model(doc)
-            
-            # Remove from storage and indexes
-            del self._storage[user_id]
-            del self._username_index[user.username]
-            del self._email_index[user.email]
             
         except UserNotFoundError:
             raise
@@ -241,7 +270,7 @@ class UserRepository:
             RepositoryError: If database operation fails.
         """
         try:
-            users = [db_to_model(doc) for doc in self._storage.values()]
+            users = [db_to_model(doc) for doc in self._collection.find()]
             return users
         except Exception as e:
             raise RepositoryError(f"Failed to list users: {str(e)}")
@@ -255,7 +284,7 @@ class UserRepository:
         Returns:
             True if user exists, False otherwise.
         """
-        return username in self._username_index
+        return self._collection.count_documents({"username": username}) > 0
 
     def exists_by_email(self, email: str) -> bool:
         """Check if a user with given email exists.
@@ -266,7 +295,7 @@ class UserRepository:
         Returns:
             True if user exists, False otherwise.
         """
-        return email in self._email_index
+        return self._collection.count_documents({"email": email}) > 0
 
     def count(self) -> int:
         """Get the total count of users in the database.
@@ -274,4 +303,4 @@ class UserRepository:
         Returns:
             The number of users.
         """
-        return len(self._storage)
+        return self._collection.count_documents({})

@@ -27,8 +27,13 @@ def db_to_model(doc: Dict[str, Any]) -> User:
     """Convert a pymongo document to a `User` model.
 
     Maps `_id` -> `id` for the model.
+    Converts ObjectId to string.
     """
+    from bson.objectid import ObjectId
+    
     d = dict(doc)
     if "_id" in d:
-        d["id"] = d.pop("_id")
+        obj_id = d.pop("_id")
+        # Convert ObjectId to string if necessary
+        d["id"] = str(obj_id) if isinstance(obj_id, ObjectId) else obj_id
     return User(**d)
