@@ -22,6 +22,14 @@ class DuplicateEmailError(UserServiceException):
         super().__init__(f"Email '{email}' is already registered")
 
 
+class DuplicateUserError(UserServiceException):
+    """Compatibility exception raised when attempting to create a user that already exists."""
+
+    def __init__(self, identifier: str):
+        self.identifier = identifier
+        super().__init__(f"User '{identifier}' already exists")
+
+
 class UserNotFoundError(UserServiceException):
     """Raised when attempting to read/update/delete a user that does not exist."""
     

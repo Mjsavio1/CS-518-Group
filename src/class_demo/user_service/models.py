@@ -1,5 +1,11 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Literal
+from typing import Optional
+from enum import Enum
+
+
+class UserRole(str, Enum):
+    admin = "admin"
+    user = "user"
 
 
 class User(BaseModel):
@@ -7,7 +13,7 @@ class User(BaseModel):
     email: EmailStr
     username: str
     password: str
-    role: Literal["admin", "user"] = "user"
+    role: UserRole = UserRole.user
 
     class Config:
         orm_mode = True

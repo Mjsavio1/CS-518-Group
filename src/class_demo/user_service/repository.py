@@ -33,7 +33,7 @@ class UserRepository:
         Raises:
             RepositoryError: If collection is invalid.
         """
-        if not collection:
+        if collection is None:
             raise RepositoryError("Collection cannot be None")
         
         self._collection = collection
