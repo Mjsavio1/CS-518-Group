@@ -12,12 +12,13 @@
 We built a Repository system with custom exception handling, and integration testing against MongoDB.
 
 **Features Added:**
+
 - `UserRepository` class for database (create, read, update, delete, list)
 - Exceptions: `DuplicateUsernameError`, `DuplicateEmailError`, `UserNotFoundError`, `InvalidUserDataError`, `RepositoryError`
 - Mapper functions to convert between Python and MongoDB
 - Indexes for unique constraints on username and email
 - Configuration system for MongoDB
-- Integration tests connecting to my MongoDB 
+- Integration tests connecting to my MongoDB
 
 ### Code & Testing Summary
 
@@ -38,12 +39,19 @@ The integration tests connect to my MongoDB database using the settings from con
 **Models Used:** Claude Haiku
 
 **Initial Prompt:**
+
 - Prompt: Create a UserRepository class for database operations with custom exceptions for duplicate username, duplicate email, and user not found scenarios
 - Result: AI generated a complete repository class with proper error handling and exception definitions
 
 **Follow-up Actions:**
+
 - Prompt 2: Implement integration tests connecting to live MongoDB with proper test fixtures
 - Manual Edits: Simplified alot of spagetti code it wrote, adjusted test database naming and added direct MongoDB connectio nto mine specificly.
 
 ### Winning Code: Mike mjs1438
-- I had the code completed by the time of the report needing to be done. Not much to disscuss since Mag hasn't finished yet. All tests passed and connct to MongoDB. I'll be happy to review what I have done with them when they can make time to meet. Everything I would say has already been said previously in this document. 
+
+- I had the code completed by the time of the report needing to be done. Not much to disscuss since Mag hasn't finished yet. All tests passed and connct to MongoDB. I'll be happy to review what I have done with them when they can make time to meet. Everything I would say has already been said previously in this document.
+
+**Update From Mag:**
+
+- My code was significantly less thorough upon initial generation with GPT-4.1. In addition, exception testing was not impolemented correctly, and integration testing was not implemented at all. After reading this lab report, no further discussion is needed.
