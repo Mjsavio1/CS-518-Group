@@ -15,5 +15,6 @@ class User(BaseModel):
     password: str
     role: UserRole = UserRole.user
 
-    class Config:
-        orm_mode = True
+model_config = {
+        "from_attributes": True
+    }
