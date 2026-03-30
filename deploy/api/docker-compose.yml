@@ -1,0 +1,12 @@
+services:
+  user-api:
+    build:
+      context: ../..
+      dockerfile: deploy/api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-class_demo_db}

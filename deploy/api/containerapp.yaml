@@ -1,0 +1,32 @@
+name: user-api
+location: East US
+type: Microsoft.App/containerApps
+properties:
+  environmentId: /subscriptions/cb1cb0f9-acf3-4756-9d26-f64adde034f8/resourceGroups/class-demo-rg/providers/Microsoft.App/managedEnvironments/class-demo-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8000
+      allowInsecure: false
+    secrets:
+      - name: mongodb-uri
+        value: <set-at-deploy-time>
+  template:
+    containers:
+      - name: user-api
+        image: mjs1438/user-api:v1
+        env:
+          - name: HOST
+            value: 0.0.0.0
+          - name: PORT
+            value: "8000"
+          - name: MONGODB_URI
+            secretRef: mongodb-uri
+          - name: MONGODB_DB_NAME
+            value: class_demo_db
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 3

@@ -2,7 +2,7 @@
 
 pydantic
 pymongo
-python_bcrypt
+bcrypt
 Requests
 nicegui
 python-dotenv

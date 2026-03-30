@@ -5,9 +5,15 @@ Can be executed directly or via ``uvicorn src.run_api:app``.  The
 and tests can access it without running the server.
 """
 
+import os
+
 from class_demo.user_api import app
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+    )

@@ -1,0 +1,136 @@
+Individual Lab Report (This Week Only)
+
+PRODUCT
+UserAPI Docker Image URL:
+https://hub.docker.com/r/mjs1438/user-api
+
+REVIEW / RETRO
+Deployment Process Summary:
+1. I created separate deployment assets for the API and app.
+2. I containerized both services with Dockerfiles.
+3. I pushed images to Docker Hub (mjs1438/user-api:v1 and mjs1438/user-app:v1).
+4. I deployed the app and API to Azure Container Apps.
+5. I confirmed both live URLs were reachable.
+
+AI Prompt / Generation Notes:
+- I used AI to generate an initial deployment scaffold.
+- I changed the generated output to match this project (FastAPI + NiceGUI).
+- I used follow-up prompts to fix Azure CLI command issues during deployment.
+- I did not use the generated output exactly as-is; I edited it to fit the lab requirements.
+
+Modifications to Generated Assets:
+- Split assets into separate folders for API and app deployments.
+- Updated container app YAML files with real Azure values (environment ID, region).
+- Switched image references from ACR format to Docker Hub format.
+- Updated deployment docs to match the actual CLI workflow used.
+- Fixed Docker build dependency issue by replacing python_bcrypt with bcrypt.
+
+THIS WEEK SCOPE CHECK
+This report contains only this week's deployment work:
+- API containerization
+- Docker Hub publish workflow for API and app images
+- Azure Container Apps deployment/update for API and app
+- Deployment asset and instruction refactor into separate app/api folders
+- Post-deployment endpoint validation
+
+DEPLOYED ENDPOINTS (VALIDATION)
+User API:
+https://user-api.whitebay-c606c597.eastus.azurecontainerapps.io
+
+User App:
+https://user-app.whitebay-c606c597.eastus.azurecontainerapps.io
+
+Validation commands used:
+1. az containerapp show -n user-api -g class-demo-rg --query properties.configuration.ingress.fqdn -o tsv
+2. az containerapp show -n user-app -g class-demo-rg --query properties.configuration.ingress.fqdn -o tsv
+
+TESTING SUMMARY (GROUP)
+Goal:
+- Run e2e and integration tests against the deployed API workflow and local integration suites (no unit/mock tests).
+
+All tests in one place (e2e + local integration):
+- tests/e2e/test_api_e2e.py
+- tests/e2e/test_api_remote_standalone.py
+- tests/user_api/test_api_int.py
+- tests/user_service/test_service_int.py
+- tests/user_app/test_app_logic_int.py
+- tests/class_demo/integration/test_repository_integration.py
+- tests/test_repository_integration.py
+
+Remote e2e test approach:
+- I created a standalone e2e test that does not import project code.
+- File: tests/e2e/test_api_remote_standalone.py
+- Imports used: unittest, requests
+- Hardcoded deployed API URL: https://user-api.whitebay-c606c597.eastus.azurecontainerapps.io
+- Includes executable entry point:
+	if __name__ == "__main__":
+			unittest.main()
+
+Remote e2e execution result:
+- Command:
+	C:/Users/Mjsav/AppData/Local/Programs/Python/Python312/python.exe -m unittest tests/e2e/test_api_remote_standalone.py -v
+- Result: PASSED
+- Count: 1 test run, 1 passed, 0 failed, 0 errors
+- Verified behavior:
+	- admin registration/login
+	- admin creates normal user
+	- normal user login and self-read
+	- RBAC check (non-admin cannot list users)
+	- admin list users
+	- admin update user
+	- admin delete user and confirm 404 after delete
+
+Integration test inventory (e2e + integration only):
+- tests/e2e/test_api_e2e.py
+- tests/e2e/test_api_remote_standalone.py
+- tests/user_api/test_api_int.py
+- tests/user_service/test_service_int.py
+- tests/user_app/test_app_logic_int.py
+- tests/class_demo/integration/test_repository_integration.py
+- tests/test_repository_integration.py
+
+Integration execution summary:
+1) API integration
+- Command:
+	RUN_INTEGRATION_TESTS=1 python -m unittest tests/user_api/test_api_int.py -v
+- Result: PARTIAL FAILURE
+- Count: 4 tests run, 2 passed, 1 failed, 1 error
+- Notes:
+	- test_list_and_authorization error (missing token in response path)
+	- test_update_and_delete failure (expected 200, got 404)
+
+2) Service integration
+- Command:
+	RUN_INTEGRATION_TESTS=1 python -m unittest tests/user_service/test_service_int.py -v
+- Result: PASSED
+- Count: 4 tests run, 4 passed
+
+3) App logic integration
+- Command:
+	RUN_INTEGRATION_TESTS=1 python -m unittest tests/user_app/test_app_logic_int.py -v
+- Result: PASSED
+- Count: 3 tests run, 3 passed
+
+4) Repository integration (class_demo/integration)
+- Command:
+	RUN_INTEGRATION_TESTS=1 python -m unittest tests/class_demo/integration/test_repository_integration.py -v
+- Result: PASSED
+- Count: 8 tests run, 8 passed
+
+5) Repository integration (legacy suite)
+- Command:
+	RUN_INTEGRATION_TESTS=1 python -m unittest tests/test_repository_integration.py -v
+- Result: FAILED
+- Count: 8 tests run, 8 errors
+- Root cause:
+	- legacy suite uses outdated model/repository API (e.g., UserRole.USER and older repository method names).
+
+Testing conclusion:
+- Remote deployed API e2e flow is validated and passing.
+- Core integration suites for service, app logic, and active repository suite are passing.
+- Some older integration suites are out of sync with current domain model and need refactor/retirement.
+
+INDIVIDUAL TESTING VERIFICATION
+- I ran remote standalone e2e tests directly against the deployed API URL.
+- I verified API and app endpoints are live.
+- I documented exact commands and outcomes above.

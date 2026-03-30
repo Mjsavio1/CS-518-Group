@@ -7,7 +7,14 @@ from class_demo.user_app.app_logic import AppLogic
 from class_demo.user_app.pages import init_pages
 
 # Initialize DB connection
-client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+mongo_uri = os.getenv("MONGODB_URI")
+if not mongo_uri:
+    raise RuntimeError(
+        "MONGODB_URI is not set. Set it to your MongoDB connection string (e.g. Atlas) "
+        "before running the container."
+    )
+
+client = MongoClient(mongo_uri)
 db = client[os.getenv("MONGODB_DB_NAME", "class_demo_db")]
 
 # Layer initialization
@@ -21,10 +28,17 @@ logic.seed_admin()
 # Init UI
 init_pages(logic)
 
+
+def run_ui() -> None:
+    ui.run(
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8080")),
+        title="User Auth Lab",
+        storage_secret=os.getenv("STORAGE_SECRET", os.urandom(24).hex()),
+        show=False,
+    )
+
+
 # ONLY run the UI if this file is executed directly (not when imported by tests)
 if __name__ in {"__main__", "fastapi"}:
-    ui.run(
-        title="User Auth Lab", 
-        storage_secret=os.urandom(24).hex(),
-        show=False  # Recommended for development/testing
-    )
+    run_ui()
