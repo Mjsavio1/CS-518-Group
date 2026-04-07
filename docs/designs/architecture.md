@@ -54,3 +54,51 @@ Provides clear explanations for why a recommendation was made.
 
 **Notification / Delivery Service**
 Delivers recommendations via in-app notifications or scheduled updates.
+
+## Planning and Design Update
+
+### Epic to Feature to Story Hierarchy
+
+#### Epic 1: Personalized Music Discovery
+
+- Feature: Listening History Insights
+	- Story: User opens Listening History panel from dashboard.
+		- Task: Render dedicated panel/tab in app shell.
+	- Story: User clicks Connect button and receives feature response.
+		- Task: Wire button to controller and render service output.
+	- Story: User views top-track style listening summary.
+		- Task: Provide service method that returns track summary payload.
+- Feature: Artist Recommendation Feed
+	- Story: User receives recommendations based on listening behavior.
+		- Task: Implement recommendation scoring method.
+	- Story: User can read recommendation explanations.
+		- Task: Include explanation text in recommendation response.
+
+#### Epic 2: User Preference Learning
+
+- Feature: Feedback Capture
+	- Story: User likes/skips recommendations.
+		- Task: Add controller actions and feedback UI controls.
+- Feature: Preference Profiles
+	- Story: User preference profile influences ranking.
+		- Task: Add model/repository support for preferences.
+
+#### Epic 3: Transparent Recommendation Experience
+
+- Feature: Explainable Recommendations
+	- Story: User sees reason metadata for each suggestion.
+		- Task: Add explanation generator and UI display.
+
+### Architectural Needs for Listening History Insights
+
+- Service layer: `ListeningService` handles feature business logic and data shaping.
+- Controller layer: `ListeningController` calls service methods and maps results to UI actions.
+- View layer: Listening History panel with button-driven interaction and result display.
+
+### Models and Repository Note
+
+For this week, the feature does not require a repository or persistence model.
+For final-project completeness, this feature will add:
+
+- Pydantic model(s): listening events, top-track summaries, and preference profile data.
+- Repository layer: storage for listening snapshots, feedback, and recommendation history.
