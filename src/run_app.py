@@ -1,10 +1,13 @@
 import os
 from nicegui import ui
 from pymongo import MongoClient
+from dotenv import load_dotenv
 from class_demo.user_service.service import UserService
 from class_demo.user_service.repository import UserRepository
-from class_demo.user_app.app_logic import AppLogic
-from class_demo.user_app.pages import init_pages
+from class_demo.user_app.main import init_pages
+from class_demo.user_app.users.user_controller import UserController
+
+load_dotenv()
 
 # Initialize DB connection
 mongo_uri = os.getenv("MONGODB_URI")
@@ -20,7 +23,7 @@ db = client[os.getenv("MONGODB_DB_NAME", "class_demo_db")]
 # Layer initialization
 repo = UserRepository(db["users"])
 service = UserService(repo)
-logic = AppLogic(service)
+logic = UserController(service)
 
 # Seed Admin
 logic.seed_admin()
@@ -40,5 +43,6 @@ def run_ui() -> None:
 
 
 # ONLY run the UI if this file is executed directly (not when imported by tests)
-if __name__ in {"__main__", "fastapi"}:
+# Include __mp_main__ for environments that spawn subprocesses.
+if __name__ in {"__main__", "__mp_main__", "fastapi"}:
     run_ui()
