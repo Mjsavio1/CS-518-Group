@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from class_demo.user_service.service import UserService
 from class_demo.user_service.repository import UserRepository
 from class_demo.user_app.main import init_pages
-from class_demo.user_app.users.user_controller import UserController
+from class_demo.user_app.logic import AppLogic
 
 load_dotenv()
 
@@ -23,7 +23,7 @@ db = client[os.getenv("MONGODB_DB_NAME", "class_demo_db")]
 # Layer initialization
 repo = UserRepository(db["users"])
 service = UserService(repo)
-logic = UserController(service)
+logic = AppLogic(service)
 
 # Seed Admin
 logic.seed_admin()
