@@ -1,0 +1,13 @@
+Title,Description
+Persist User Data Between Sessions,"Save and reload core user data like playlists, liked songs, and settings when the app restarts."
+Add Recommended-Only Filter,"Let users view only recommended songs in the song list."
+Add Recommended Song to Playlist,"Allow adding a recommended song directly to a selected playlist."
+Build Basic Media Player,"Implement play/pause and skip controls for recommended songs."
+Improve Empty and Error States,"Show clear messages when no data is available or when loading fails."
+Recommend Smaller Artists from Listening History,"Suggest lesser-known artists based on the user's recently played songs and liked genres."
+Add Recent Plays Section,"Show a short list of recently played tracks so users can quickly replay songs."
+Add Like Button on Player,"Let users like the currently playing song directly from the media player."
+Add Remove Song from Playlist,"Allow users to remove songs from a playlist with one click."
+Add Playlist Rename Option,"Allow users to rename existing playlists from the playlist settings menu."
+Add Song Duration Display,"Show track length next to each song in lists and recommendations."
+Add Simple Volume Memory,"Remember the user's last volume setting between sessions."

@@ -1,16 +1,23 @@
 from nicegui import ui
 
 from .listening_controller import ListeningController
+from ...user_service.models import User
+from ..interfaces import AppLogic
+from ..session import SessionManager
 
 
-def render_listening_module(controller: ListeningController) -> None:
+def _parse_lines(raw_text: str) -> list[str]:
+    return [line.strip() for line in raw_text.splitlines() if line.strip()]
+
+
+def render_listening_module(controller: ListeningController, logic: AppLogic, current_user: User) -> None:
     """Render the Listening History panel inside a tab panel."""
     with ui.column().classes("w-full gap-4"):
         ui.label("Listening History").classes("text-h5")
         ui.label("Discover insights from your Spotify listening activity.").classes("text-subtitle1 text-grey")
 
-        status_label = ui.label("").classes("text-body1 text-primary")
-        tracks_table: ui.table | None = None
+        status_label = ui.label(controller.get_greeting()).classes("text-body1 text-primary")
+        ui.label(controller.get_safety_notes()).classes("text-caption text-secondary")
 
         columns = [
             {"name": "title", "label": "Track", "field": "title", "align": "left"},
@@ -19,12 +26,112 @@ def render_listening_module(controller: ListeningController) -> None:
         ]
         tracks_container = ui.column().classes("w-full")
 
-        def on_connect():
-            status_label.set_text(controller.get_greeting())
-            tracks = controller.get_top_tracks()
+        auth_url_input = ui.input("Secure Spotify Login URL", value="").props("readonly").classes("w-full")
+
+        def refresh_tracks() -> None:
+            if not current_user.id:
+                tracks_container.clear()
+                status_label.set_text("User session missing; re-login required.")
+                return
+
+            try:
+                tracks = controller.get_top_tracks(current_user, refresh_callback=lambda u: user_logic.get_decrypted_refresh_token(u, u.id))
+            except Exception as exc:
+                tracks_container.clear()
+                status_label.set_text(str(exc))
+                return
             tracks_container.clear()
             with tracks_container:
                 ui.label("Your Top Tracks").classes("text-h6 mt-2")
                 ui.table(columns=columns, rows=tracks).classes("w-full")
 
-        ui.button("Connect to Spotify", on_click=on_connect).props("icon=music_note color=green")
+        def generate_secure_link() -> None:
+            if not current_user.id:
+                ui.notify("Cannot connect Spotify: user ID is missing.", type="negative")
+                return
+            try:
+                auth_url = controller.start_secure_connection(current_user.id)
+                auth_url_input.set_value(auth_url)
+                status_label.set_text("Secure link generated. Open it and approve access; callback completes automatically.")
+                ui.notify("Secure Spotify link generated.", type="positive")
+            except Exception as exc:
+                ui.notify(str(exc), type="negative")
+
+        def open_spotify_login() -> None:
+            auth_url = auth_url_input.value or ""
+            if not auth_url:
+                ui.notify("Generate the secure link first.", type="warning")
+                return
+            ui.navigate.to(auth_url)
+
+        def disconnect_spotify() -> None:
+            if not current_user.id:
+                ui.notify("Cannot disconnect Spotify: user ID is missing.", type="negative")
+                return
+            controller.disconnect(current_user.id)
+            tracks_container.clear()
+            status_label.set_text("Spotify disconnected.")
+            ui.notify("Spotify session removed.", type="positive")
+
+        with ui.row().classes("items-center gap-3"):
+            ui.button("1) Generate Secure Link", on_click=generate_secure_link).props("icon=security color=green")
+            ui.button("2) Open Spotify Login", on_click=open_spotify_login).props("icon=open_in_new color=primary")
+            ui.button("Disconnect", on_click=disconnect_spotify).props("icon=logout color=negative")
+
+        with ui.row().classes("items-center gap-3"):
+            ui.button("Load Top Tracks", on_click=refresh_tracks).props("icon=queue_music color=secondary")
+
+        ui.separator()
+        ui.label("Saved Music Preferences").classes("text-h6")
+        playlists_input = ui.textarea(
+            "Playlists (one per line)",
+            value="\n".join(current_user.playlists),
+        ).classes("w-full")
+        liked_songs_input = ui.textarea(
+            "Liked Songs (one per line)",
+            value="\n".join(current_user.liked_songs),
+        ).classes("w-full")
+
+        settings = dict(current_user.settings)
+        theme_setting = str(settings.get("theme", "system"))
+        notifications_enabled = bool(settings.get("notifications_enabled", True))
+        autoplay_enabled = bool(settings.get("autoplay_enabled", True))
+
+        with ui.row().classes("items-center gap-6"):
+            theme_select = ui.select(
+                options=["system", "light", "dark"],
+                value=theme_setting,
+                label="Theme",
+            )
+            notifications_toggle = ui.switch("Notifications", value=notifications_enabled)
+            autoplay_toggle = ui.switch("Autoplay", value=autoplay_enabled)
+
+        def save_preferences() -> None:
+            if not current_user.id:
+                ui.notify("Cannot save preferences: user ID is missing.", type="negative")
+                return
+
+            updated_settings = {
+                **settings,
+                "theme": theme_select.value,
+                "notifications_enabled": bool(notifications_toggle.value),
+                "autoplay_enabled": bool(autoplay_toggle.value),
+            }
+
+            try:
+                updated_user = logic.update_user_data(
+                    requester=current_user,
+                    user_id=current_user.id,
+                    playlists=_parse_lines(playlists_input.value or ""),
+                    liked_songs=_parse_lines(liked_songs_input.value or ""),
+                    settings=updated_settings,
+                )
+                SessionManager.login(updated_user)
+                current_user.playlists = list(updated_user.playlists)
+                current_user.liked_songs = list(updated_user.liked_songs)
+                current_user.settings = dict(updated_user.settings)
+                ui.notify("Preferences saved.", type="positive")
+            except Exception as exc:
+                ui.notify(str(exc), type="negative")
+
+        ui.button("Save Preferences", on_click=save_preferences).props("color=primary")

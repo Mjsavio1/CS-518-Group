@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -83,6 +83,31 @@ class UserControllerMSA(AppLogicInterface):
             self._raise_for_http_error(response)
 
         return [self._to_user(item) for item in response.json()]
+
+    def update_user_data(
+        self,
+        requester: User,
+        user_id: str,
+        playlists: List[str],
+        liked_songs: List[str],
+        settings: Dict[str, Any],
+    ) -> User:
+        updates = {
+            "playlists": playlists,
+            "liked_songs": liked_songs,
+            "settings": settings,
+        }
+
+        response = requests.put(
+            f"{self.api_base_url}/users/{user_id}",
+            json=updates,
+            headers=self._auth_headers_for(requester),
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code != 200:
+            self._raise_for_http_error(response)
+
+        return self._to_user(response.json())
 
     def _auth_headers_for(self, user: User) -> Dict[str, str]:
         token: Optional[str] = None

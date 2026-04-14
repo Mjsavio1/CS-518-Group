@@ -73,6 +73,29 @@ class TestAppLogicIntegration(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.logic.list_all_users(standard)
 
+    def test_user_data_persists_between_logins(self):
+        """Verify playlists/likes/settings are persisted and reloaded."""
+        created = self.service.create_user(None, {
+            "username": "musicfan",
+            "email": "musicfan@example.com",
+            "password": "listen123",
+            "role": UserRole.user,
+        })
+
+        self.logic.update_user_data(
+            requester=created,
+            user_id=created.id,
+            playlists=["Chill Mix", "Workout Boost"],
+            liked_songs=["Track A", "Track B"],
+            settings={"theme": "dark", "notifications_enabled": False},
+        )
+
+        reloaded = self.logic.login("musicfan", "listen123")
+        self.assertEqual(reloaded.playlists, ["Chill Mix", "Workout Boost"])
+        self.assertEqual(reloaded.liked_songs, ["Track A", "Track B"])
+        self.assertEqual(reloaded.settings.get("theme"), "dark")
+        self.assertFalse(reloaded.settings.get("notifications_enabled"))
+
     @classmethod
     def tearDownClass(cls):
         cls.client.drop_database(cls.db_name)

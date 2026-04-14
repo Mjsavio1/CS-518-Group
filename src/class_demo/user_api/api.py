@@ -14,13 +14,13 @@ Exceptions raised by the service layer are translated into appropriate HTTP
 status codes using a global exception handler.
 """
 
-from typing import Optional, Dict
+from typing import Any, Dict, List, Optional
 
 import secrets
 from fastapi import Depends, FastAPI, HTTPException, status, Header
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from ..user_service import service_exceptions as svc_exc
 from ..user_service.service import UserService
@@ -107,6 +107,9 @@ class UserIn(BaseModel):
     username: str
     password: str
     role: Optional[UserRole] = None
+    playlists: List[str] = Field(default_factory=list)
+    liked_songs: List[str] = Field(default_factory=list)
+    settings: Dict[str, Any] = Field(default_factory=dict)
 
 
 class UserOut(BaseModel):
@@ -114,6 +117,9 @@ class UserOut(BaseModel):
     email: EmailStr
     username: str
     role: UserRole
+    playlists: List[str] = Field(default_factory=list)
+    liked_songs: List[str] = Field(default_factory=list)
+    settings: Dict[str, Any] = Field(default_factory=dict)
 
 
 # --- exception handling ----------------------------------------------------
@@ -200,12 +206,37 @@ def get_user(
 @app.put("/users/{user_id}", response_model=UserOut)
 def update_user(
     user_id: str,
-    updates: Dict[str, Optional[str]],
+    updates: Dict[str, Any],
     current: User = Depends(get_current_user),
     service: UserService = Depends(get_service),
 ):
     user = service.update_user(current, user_id, updates)
     return UserOut(**user.dict())
+
+
+@app.delete("/users/{user_id}/spotify", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_spotify(
+    user_id: str,
+    current: User = Depends(get_current_user),
+    service: UserService = Depends(get_service),
+):
+    # only the user or admin may revoke
+    if current.role != UserRole.admin and current.id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    try:
+        # clear spotify fields
+        updates = {
+            "spotify_id": None,
+            "spotify_refresh_token": None,
+            "spotify_display_name": None,
+            "spotify_token_expires_at": None,
+        }
+        user = service.update_user(current, user_id, updates)
+    except svc_exc.UserServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return None
 
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
