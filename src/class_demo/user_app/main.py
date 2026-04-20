@@ -36,6 +36,42 @@ def init_pages(
                     ui.notify(str(e), type="negative")
 
             ui.button("Login", on_click=do_login).classes("w-full")
+            ui.link("Create account", "/signup").classes("text-primary")
+
+    @ui.page("/signup")
+    def signup_page():
+        with ui.card().classes("absolute-center w-96"):
+            ui.label("Create Account").classes("text-h6")
+            email_input = ui.input("Email")
+            username_input = ui.input("Username")
+            password_input = ui.input("Password", password=True)
+            confirm_input = ui.input("Confirm Password", password=True)
+
+            def do_signup():
+                email = (email_input.value or "").strip()
+                username = (username_input.value or "").strip()
+                password = (password_input.value or "").strip()
+                confirm_password = (confirm_input.value or "").strip()
+
+                if not email or not username or not password:
+                    ui.notify("Email, username, and password are required.", type="negative")
+                    return
+
+                if password != confirm_password:
+                    ui.notify("Passwords do not match.", type="negative")
+                    return
+
+                try:
+                    user_logic.create_user(email=email, username=username, password=password)
+                    user = user_logic.login(username, password)
+                    SessionManager.login(user)
+                    ui.notify("Account created successfully.", type="positive")
+                    ui.navigate.to("/")
+                except Exception as e:
+                    ui.notify(str(e), type="negative")
+
+            ui.button("Create Account", on_click=do_signup).classes("w-full")
+            ui.link("Back to login", "/login").classes("text-primary")
 
     @ui.page("/")
     def dashboard():

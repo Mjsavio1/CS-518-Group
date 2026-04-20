@@ -30,6 +30,22 @@ class ApiAppLogic(AppLogicInterface):
 		if response.status_code not in (200, 409):
 			self._raise_for_http_error(response)
 
+	def create_user(self, email: str, username: str, password: str) -> User:
+		response = requests.post(
+			f"{self.api_base_url}/users",
+			json={
+				"email": email,
+				"username": username,
+				"password": password,
+				"role": "user",
+			},
+			timeout=self.timeout_seconds,
+		)
+		if response.status_code != 200:
+			self._raise_for_http_error(response)
+
+		return self._to_user(response.json())
+
 	def login(self, username_or_email: str, password: str) -> User:
 		auth_response = requests.post(
 			f"{self.api_base_url}/login",

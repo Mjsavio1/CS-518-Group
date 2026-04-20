@@ -39,6 +39,26 @@ class AppLogic(AppLogicInterface):
 			except svc_exc.DuplicateUsernameError:
 				pass
 
+	def create_user(self, email: str, username: str, password: str) -> User:
+		try:
+			return self.service.create_user(
+				None,
+				{
+					"email": email,
+					"username": username,
+					"password": password,
+					"role": UserRole.user,
+				},
+			)
+		except svc_exc.DuplicateUsernameError:
+			raise ValueError("That username is already in use.")
+		except svc_exc.DuplicateEmailError:
+			raise ValueError("That email is already registered.")
+		except svc_exc.InvalidUserDataError as e:
+			raise ValueError(str(e))
+		except svc_exc.UserServiceError as e:
+			raise ValueError(str(e))
+
 	def login(self, username_or_email: str, password: str) -> User:
 		try:
 			return self.service.authenticate(username_or_email, password)

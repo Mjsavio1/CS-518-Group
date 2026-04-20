@@ -55,6 +55,23 @@ class TestAppLogicIntegration(unittest.TestCase):
             self.logic.login("tester", "wrongpassword")
         self.assertEqual(str(cm.exception), "Invalid credentials provided.")
 
+    def test_signup_and_login_flow(self):
+        """Verify self-registration creates a persistent account that can log in."""
+        created = self.logic.create_user(
+            email="newuser@example.com",
+            username="newuser",
+            password="new-password-123",
+        )
+
+        self.assertEqual(created.username, "newuser")
+        self.assertEqual(created.email, "newuser@example.com")
+
+        by_username = self.logic.login("newuser", "new-password-123")
+        self.assertEqual(by_username.email, "newuser@example.com")
+
+        by_email = self.logic.login("newuser@example.com", "new-password-123")
+        self.assertEqual(by_email.username, "newuser")
+
     def test_rbac_list_users(self):
         """Verify that logic layer enforces RBAC via the service."""
         # 1. Create an admin and a regular user

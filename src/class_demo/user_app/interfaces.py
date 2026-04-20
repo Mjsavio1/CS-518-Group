@@ -10,6 +10,10 @@ class AppLogic(ABC):
         """Seed an initial administrator account when needed."""
 
     @abstractmethod
+    def create_user(self, email: str, username: str, password: str) -> User:
+        """Create a new user account for self-registration."""
+
+    @abstractmethod
     def login(self, username_or_email: str, password: str) -> User:
         """Authenticate and return the current user."""
 
