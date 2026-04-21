@@ -1,0 +1,12 @@
+{
+    "unittest.loader": {
+        "_FailedTest": [
+            "test_repository_integration",
+            "user_service.test_mapper",
+            "user_service.test_repository",
+            "user_service.test_repository_exceptions",
+            "user_service.test_service_int",
+            "user_service.test_service_unit"
+        ]
+    }
+}
