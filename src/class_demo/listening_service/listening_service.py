@@ -376,6 +376,7 @@ class ListeningService:
             )
             if rec_resp.status_code == 200:
                 rec_artist_ids: List[str] = []
+                rec_raw_candidates: List[Dict[str, object]] = []
                 for track in rec_resp.json().get("tracks", []):
                     for artist in track.get("artists", []):
                         ra_id = artist.get("id")
@@ -387,6 +388,16 @@ class ListeningService:
                             and ra_name.lower() not in top_artist_names
                         ):
                             rec_artist_ids.append(ra_id)
+                            rec_raw_candidates.append({
+                                "id": ra_id,
+                                "name": ra_name,
+                            })
+
+                # If enrichment endpoints fail, keep raw recommendation artists
+                # so users still get meaningful suggestions instead of an empty set.
+                if not candidates:
+                    for raw in rec_raw_candidates:
+                        _add_candidate(raw)
 
                 # De-duplicate while preserving order.
                 dedup_ids = list(dict.fromkeys(rec_artist_ids))

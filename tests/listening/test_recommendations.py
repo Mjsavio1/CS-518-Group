@@ -215,3 +215,56 @@ def test_recommendations_fallback_to_recommendations_enrichment_when_related_emp
     assert recs
     assert "Hidden Seed" in names
     assert "Big Artist" not in names
+
+
+def test_recommendations_use_raw_recommendation_artists_when_enrichment_fails():
+    def fake_post(url, data, timeout=0):
+        return _FakeResponse(200, {"access_token": "tok", "expires_in": 3600})
+
+    def fake_get(url, headers=None, params=None, timeout=0):
+        if url.endswith("/top/tracks"):
+            return _FakeResponse(200, _TOP_TRACKS_PAYLOAD)
+        if url.endswith("/top/artists"):
+            return _FakeResponse(
+                200,
+                {
+                    "items": [
+                        {"id": "artist-1", "name": "Big Artist", "popularity": 80, "genres": ["pop"]},
+                        {"id": "artist-2", "name": "Medium Artist", "popularity": 70, "genres": ["rock"]},
+                    ]
+                },
+            )
+        if "related-artists" in url:
+            return _FakeResponse(200, {"artists": []})
+        if url.endswith("/recommendations"):
+            return _FakeResponse(
+                200,
+                {
+                    "tracks": [
+                        {"artists": [{"id": "ra-raw-1", "name": "Fresh Find"}]},
+                    ]
+                },
+            )
+        if url.endswith("/artists"):
+            return _FakeResponse(500, {"error": {"status": 500}})
+        return _FakeResponse(200, {"items": []})
+
+    svc = ListeningService(
+        client_id="cid",
+        redirect_uri="http://localhost:8080/callback",
+        post_request=fake_post,
+        get_request=fake_get,
+    )
+
+    import time
+    svc._sessions["user-1"] = {
+        "access_token": "tok",
+        "expires_at": time.time() + 3600,
+        "display_name": "Tester",
+    }
+
+    recs = svc.get_artist_recommendations("user-1", max_results=5)
+    names = [r["name"] for r in recs]
+
+    assert recs
+    assert "Fresh Find" in names
