@@ -172,11 +172,9 @@ class ListeningService:
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=self.timeout_seconds,
         )
-        if profile_response.status_code != 200:
-            self._pending_auth.pop(user_id, None)
-            raise SpotifyConnectionError("Connected to Spotify but could not read account profile.")
-
-        profile = profile_response.json()
+        profile: Dict[str, object] = {}
+        if profile_response.status_code == 200:
+            profile = profile_response.json()
         refresh_token = token_payload.get("refresh_token")
         spotify_user_id = profile.get("id")
         expires_at = time.time() + max(expires_in - 30, 30)

@@ -104,6 +104,37 @@ def test_complete_connection_from_params_success(service_with_mocks):
     assert result["display_name"] == "Safety User"
 
 
+def test_complete_connection_succeeds_when_profile_lookup_fails():
+    def fake_post(url, data, timeout):
+        return _FakeResponse(200, {"access_token": "token-123", "expires_in": 3600})
+
+    def fake_get(url, headers=None, params=None, timeout=0):
+        if url.endswith("/me"):
+            return _FakeResponse(403, {"error": {"status": 403, "message": "Forbidden"}})
+        return _FakeResponse(200, {"items": []})
+
+    service = ListeningService(
+        client_id="spotify-client-id",
+        redirect_uri="http://localhost:8080/callback",
+        scope="user-top-read",
+        post_request=fake_post,
+        get_request=fake_get,
+    )
+
+    auth_url = service.start_secure_connection("user-1")
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+
+    result = service.complete_secure_connection_from_params(
+        user_id="user-1",
+        code="abc123",
+        state=state,
+        error=None,
+    )
+
+    assert result["status"] == "connected"
+    assert result["display_name"] == "Spotify User"
+
+
 def test_complete_connection_from_params_error_rejected(service_with_mocks):
     service_with_mocks.start_secure_connection("user-1")
     with pytest.raises(SpotifyConnectionError):
