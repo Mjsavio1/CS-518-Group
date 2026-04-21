@@ -41,6 +41,19 @@ class ListeningController:
     def disconnect(self, user_id: str) -> None:
         self.service.disconnect(user_id)
 
+    def get_artist_recommendations(
+        self,
+        user_id: str,
+        max_results: int = 10,
+        popularity_max: int = 60,
+    ) -> List[Dict]:
+        """Return lesser-known artist recommendations based on the user's top tracks."""
+        return self.service.get_artist_recommendations(
+            user_id=user_id,
+            max_results=max_results,
+            popularity_max=popularity_max,
+        )
+
     def get_top_tracks(self, user, refresh_callback=None) -> List[Dict[str, str]]:
         """Attempt to return top tracks. If session missing and a refresh_callback
         is provided (callable that takes a user and returns a refresh token string),

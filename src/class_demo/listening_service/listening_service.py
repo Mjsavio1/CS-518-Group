@@ -242,6 +242,83 @@ class ListeningService:
             )
         return tracks
 
+    def get_artist_recommendations(
+        self,
+        user_id: str,
+        max_results: int = 10,
+        popularity_max: int = 60,
+    ) -> List[Dict[str, object]]:
+        """Recommend lesser-known artists based on the user's Spotify top tracks.
+
+        Algorithm:
+        1. Fetch the user's top 20 tracks to collect unique seed artist IDs.
+        2. For up to 5 seed artists query Spotify's related-artists endpoint.
+        3. Remove any artist already present in the user's own top artists.
+        4. Keep only artists whose Spotify popularity score is <= popularity_max.
+        5. De-duplicate and sort ascending by popularity (most underground first).
+        6. Return up to max_results results.
+
+        popularity_max=60 targets artists below mainstream chart level (70+).
+        """
+        if not self.is_connected(user_id):
+            raise SpotifyConnectionError("Spotify is not connected. Complete secure connection first.")
+
+        token = str(self._sessions[user_id]["access_token"])
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Step 1 – fetch top tracks (raw) to extract artist IDs
+        response = self._get_request(
+            self._TOP_TRACKS_URL,
+            headers=headers,
+            params={"limit": 20, "time_range": "medium_term"},
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code != 200:
+            if response.status_code == 401:
+                self._sessions.pop(user_id, None)
+            raise SpotifyConnectionError("Failed to fetch top tracks for recommendations.")
+
+        items = response.json().get("items", [])
+
+        seen_ids: set = set()
+        seed_artists: List[tuple] = []      # (artist_id, artist_name)
+        top_artist_names: set = set()       # lower-cased names already known to user
+
+        for item in items:
+            for artist in item.get("artists", []):
+                aid = artist.get("id")
+                aname = (artist.get("name") or "").strip()
+                if aid and aid not in seen_ids:
+                    seen_ids.add(aid)
+                    seed_artists.append((aid, aname))
+                    top_artist_names.add(aname.lower())
+
+        # Step 2 – query related-artists for each seed (cap at 5 to avoid rate limits)
+        candidates: Dict[str, Dict] = {}
+
+        for artist_id, _ in seed_artists[:5]:
+            rel_url = f"https://api.spotify.com/v1/artists/{artist_id}/related-artists"
+            rel_resp = self._get_request(rel_url, headers=headers, timeout=self.timeout_seconds)
+            if rel_resp.status_code != 200:
+                continue
+            for ra in rel_resp.json().get("artists", []):
+                ra_id = ra.get("id")
+                ra_name = (ra.get("name") or "").strip()
+                if not ra_id or ra_name.lower() in top_artist_names:
+                    continue
+                if ra_id not in candidates:
+                    genres = ra.get("genres") or []
+                    candidates[ra_id] = {
+                        "name": ra_name,
+                        "popularity": int(ra.get("popularity") or 50),
+                        "genres": ", ".join(genres[:3]) if genres else "—",
+                    }
+
+        # Step 3 – filter by popularity threshold, sort ascending, truncate
+        filtered = [v for v in candidates.values() if v["popularity"] <= popularity_max]
+        filtered.sort(key=lambda x: x["popularity"])
+        return filtered[:max_results]
+
     def refresh_session_with_refresh_token(self, user_id: str, refresh_token: str) -> bool:
         """Exchange a stored refresh token for a fresh access token and populate session."""
         self._validate_config()

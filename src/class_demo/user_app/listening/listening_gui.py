@@ -82,6 +82,41 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
             ui.button("Load Top Tracks", on_click=refresh_tracks).props("icon=queue_music color=secondary")
 
         ui.separator()
+        ui.label("Discover Lesser-Known Artists").classes("text-h6")
+        ui.label(
+            "Based on your top tracks, these artists are similar to what you like "
+            "but have a lower mainstream popularity score."
+        ).classes("text-caption text-grey")
+
+        rec_columns = [
+            {"name": "name",       "label": "Artist",     "field": "name",       "align": "left"},
+            {"name": "popularity", "label": "Popularity", "field": "popularity", "align": "center"},
+            {"name": "genres",     "label": "Genres",     "field": "genres",     "align": "left"},
+        ]
+        rec_container = ui.column().classes("w-full")
+
+        def load_recommendations() -> None:
+            if not current_user.id:
+                ui.notify("Cannot load recommendations: user session missing.", type="negative")
+                return
+            try:
+                recs = controller.get_artist_recommendations(
+                    user_id=current_user.id,
+                    max_results=10,
+                    popularity_max=60,
+                )
+                rec_container.clear()
+                with rec_container:
+                    if recs:
+                        ui.table(columns=rec_columns, rows=recs).classes("w-full")
+                    else:
+                        ui.label("No lesser-known recommendations found. Try listening to more tracks first.").classes("text-grey")
+            except Exception as exc:
+                ui.notify(str(exc), type="negative")
+
+        ui.button("Get Recommendations", on_click=load_recommendations).props("icon=explore color=deep-purple")
+
+        ui.separator()
         ui.label("Saved Music Preferences").classes("text-h6")
         playlists_input = ui.textarea(
             "Playlists (one per line)",
