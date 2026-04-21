@@ -286,16 +286,24 @@ class ListeningService:
 
         seen_ids: set = set()
         seed_artists: List[tuple] = []      # (artist_id, artist_name)
-        top_artist_names: set = set()       # lower-cased names already known to user
+        seed_artist_ids: set = set()
+        seed_primary_names: set = set()
+        top_artist_names: set = set()       # lower-cased top-artist names already known to user
 
         for item in items:
+            primary_name = ""
+            if item.get("artists"):
+                primary_name = (item.get("artists")[0].get("name") or "").strip()
+            if primary_name:
+                seed_primary_names.add(primary_name.lower())
+
             for artist in item.get("artists", []):
                 aid = artist.get("id")
                 aname = (artist.get("name") or "").strip()
                 if aid and aid not in seen_ids:
                     seen_ids.add(aid)
                     seed_artists.append((aid, aname))
-                    top_artist_names.add(aname.lower())
+                    seed_artist_ids.add(aid)
 
         top_artist_ids: set = set()
         top_artists_resp = self._get_request(
@@ -318,7 +326,12 @@ class ListeningService:
             ra_name = str((artist_obj.get("name") or "")).strip()
             if not ra_id or not ra_name:
                 return
-            if ra_id in top_artist_ids or ra_name.lower() in top_artist_names:
+            if (
+                ra_id in seed_artist_ids
+                or ra_id in top_artist_ids
+                or ra_name.lower() in seed_primary_names
+                or ra_name.lower() in top_artist_names
+            ):
                 return
             if ra_id in candidates:
                 return
