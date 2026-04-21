@@ -154,24 +154,42 @@ def test_recommendations_fallback_when_threshold_too_low(connected_service):
     assert recs, "Expected fallback recommendations when strict threshold yields none"
 
 
-def test_recommendations_fallback_to_top_artists_when_related_empty():
+def test_recommendations_fallback_to_recommendations_enrichment_when_related_empty():
     def fake_post(url, data, timeout=0):
         return _FakeResponse(200, {"access_token": "tok", "expires_in": 3600})
 
     def fake_get(url, headers=None, params=None, timeout=0):
         if url.endswith("/top/tracks"):
             return _FakeResponse(200, _TOP_TRACKS_PAYLOAD)
-        if "related-artists" in url:
-            return _FakeResponse(200, {"artists": []})
-        if url.endswith("/recommendations"):
-            return _FakeResponse(200, {"tracks": []})
         if url.endswith("/top/artists"):
             return _FakeResponse(
                 200,
                 {
                     "items": [
-                        {"id": "ta-1", "name": "Deep Cut Artist", "popularity": 18, "genres": ["indie"]},
-                        {"id": "ta-2", "name": "Cult Favorite", "popularity": 25, "genres": ["alt"]},
+                        {"id": "artist-1", "name": "Big Artist", "popularity": 80, "genres": ["pop"]},
+                        {"id": "artist-2", "name": "Medium Artist", "popularity": 70, "genres": ["rock"]},
+                    ]
+                },
+            )
+        if "related-artists" in url:
+            return _FakeResponse(200, {"artists": []})
+        if url.endswith("/recommendations"):
+            return _FakeResponse(
+                200,
+                {
+                    "tracks": [
+                        {"artists": [{"id": "ra-1", "name": "Hidden Seed"}]},
+                        {"artists": [{"id": "artist-1", "name": "Big Artist"}]},
+                    ]
+                },
+            )
+        if url.endswith("/artists"):
+            return _FakeResponse(
+                200,
+                {
+                    "artists": [
+                        {"id": "ra-1", "name": "Hidden Seed", "popularity": 23, "genres": ["indie"]},
+                        {"id": "artist-1", "name": "Big Artist", "popularity": 80, "genres": ["pop"]},
                     ]
                 },
             )
@@ -195,4 +213,5 @@ def test_recommendations_fallback_to_top_artists_when_related_empty():
     names = [r["name"] for r in recs]
 
     assert recs
-    assert "Deep Cut Artist" in names
+    assert "Hidden Seed" in names
+    assert "Big Artist" not in names
