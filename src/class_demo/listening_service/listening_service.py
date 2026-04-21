@@ -27,6 +27,9 @@ class ListeningService:
     _TOKEN_URL = "https://accounts.spotify.com/api/token"
     _ME_URL = "https://api.spotify.com/v1/me"
     _TOP_TRACKS_URL = "https://api.spotify.com/v1/me/top/tracks"
+    _TOP_ARTISTS_URL = "https://api.spotify.com/v1/me/top/artists"
+    _RECOMMENDATIONS_URL = "https://api.spotify.com/v1/recommendations"
+    _ARTISTS_URL = "https://api.spotify.com/v1/artists"
 
     def __init__(
         self,
@@ -248,15 +251,15 @@ class ListeningService:
     ) -> List[Dict[str, object]]:
         """Recommend lesser-known artists based on the user's Spotify top tracks.
 
-        Algorithm:
+          Algorithm (with fallbacks):
           1. Fetch the user's top 50 tracks to collect unique seed artist IDs.
-          2. For up to 12 seed artists query Spotify's related-artists endpoint.
-        3. Remove any artist already present in the user's own top artists.
-        4. Keep only artists whose Spotify popularity score is <= popularity_max.
-          5. If strict filtering returns nothing, fall back to the least-popular
-              related artists so users still get recommendations.
-          6. De-duplicate and sort ascending by popularity (most underground first).
-          7. Return up to max_results results.
+          2. Query related-artists for up to 12 seeds.
+          3. If sparse, call recommendations endpoint using seed artists, then enrich
+              artist IDs via /artists?ids=... so we can rank by popularity.
+          4. If still sparse, fall back to user's top artists and surface the least
+              popular entries as "rediscovery" suggestions.
+          5. Remove already-known artists where possible, de-duplicate, and rank by
+              ascending popularity so the least-mainstream artists appear first.
 
         popularity_max=60 targets artists below mainstream chart level (70+).
         """
@@ -314,10 +317,83 @@ class ListeningService:
                         "genres": ", ".join(genres[:3]) if genres else "—",
                     }
 
-        # Step 3 – filter by popularity threshold
-        filtered = [v for v in candidates.values() if v["popularity"] <= popularity_max]
+        # Step 3 – fallback via recommendations endpoint + artist enrichment.
+        if not candidates and seed_artists:
+            seed_ids = [aid for aid, _ in seed_artists[:5]]
+            rec_resp = self._get_request(
+                self._RECOMMENDATIONS_URL,
+                headers=headers,
+                params={
+                    "seed_artists": ",".join(seed_ids),
+                    "limit": 100,
+                    "max_popularity": min(popularity_max + 20, 100),
+                },
+                timeout=self.timeout_seconds,
+            )
+            if rec_resp.status_code == 200:
+                rec_artist_ids: List[str] = []
+                for track in rec_resp.json().get("tracks", []):
+                    for artist in track.get("artists", []):
+                        ra_id = artist.get("id")
+                        ra_name = (artist.get("name") or "").strip()
+                        if ra_id and ra_name and ra_name.lower() not in top_artist_names:
+                            rec_artist_ids.append(ra_id)
 
-        # Fallback: if strict threshold is too restrictive, return least-popular candidates.
+                # De-duplicate while preserving order.
+                dedup_ids = list(dict.fromkeys(rec_artist_ids))
+                for i in range(0, len(dedup_ids), 50):
+                    chunk = dedup_ids[i : i + 50]
+                    artist_resp = self._get_request(
+                        self._ARTISTS_URL,
+                        headers=headers,
+                        params={"ids": ",".join(chunk)},
+                        timeout=self.timeout_seconds,
+                    )
+                    if artist_resp.status_code != 200:
+                        continue
+                    for artist in artist_resp.json().get("artists", []):
+                        if not artist:
+                            continue
+                        ra_id = artist.get("id")
+                        ra_name = (artist.get("name") or "").strip()
+                        if not ra_id or not ra_name or ra_name.lower() in top_artist_names:
+                            continue
+                        if ra_id not in candidates:
+                            genres = artist.get("genres") or []
+                            candidates[ra_id] = {
+                                "name": ra_name,
+                                "popularity": int(artist.get("popularity") or 50),
+                                "genres": ", ".join(genres[:3]) if genres else "—",
+                            }
+
+        # Step 4 – last-resort fallback from user's top artists (rediscovery mode).
+        if not candidates:
+            top_artists_resp = self._get_request(
+                self._TOP_ARTISTS_URL,
+                headers=headers,
+                params={"limit": 50, "time_range": "medium_term"},
+                timeout=self.timeout_seconds,
+            )
+            if top_artists_resp.status_code == 200:
+                # Use least popular entries first from the user's own long-tail taste profile.
+                artists = top_artists_resp.json().get("items", [])
+                artists_sorted = sorted(artists, key=lambda a: int(a.get("popularity") or 50))
+                for artist in artists_sorted:
+                    ra_id = artist.get("id")
+                    ra_name = (artist.get("name") or "").strip()
+                    if not ra_id or not ra_name:
+                        continue
+                    genres = artist.get("genres") or []
+                    candidates[ra_id] = {
+                        "name": ra_name,
+                        "popularity": int(artist.get("popularity") or 50),
+                        "genres": ", ".join(genres[:3]) if genres else "—",
+                    }
+
+        # Step 5 – filter and rank with a relaxed fallback threshold.
+        filtered = [v for v in candidates.values() if v["popularity"] <= popularity_max]
+        if not filtered:
+            filtered = [v for v in candidates.values() if v["popularity"] <= min(popularity_max + 20, 100)]
         if not filtered:
             filtered = list(candidates.values())
 

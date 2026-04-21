@@ -152,3 +152,47 @@ def test_recommendations_requires_connection():
 def test_recommendations_fallback_when_threshold_too_low(connected_service):
     recs = connected_service.get_artist_recommendations("user-1", popularity_max=5)
     assert recs, "Expected fallback recommendations when strict threshold yields none"
+
+
+def test_recommendations_fallback_to_top_artists_when_related_empty():
+    def fake_post(url, data, timeout=0):
+        return _FakeResponse(200, {"access_token": "tok", "expires_in": 3600})
+
+    def fake_get(url, headers=None, params=None, timeout=0):
+        if url.endswith("/top/tracks"):
+            return _FakeResponse(200, _TOP_TRACKS_PAYLOAD)
+        if "related-artists" in url:
+            return _FakeResponse(200, {"artists": []})
+        if url.endswith("/recommendations"):
+            return _FakeResponse(200, {"tracks": []})
+        if url.endswith("/top/artists"):
+            return _FakeResponse(
+                200,
+                {
+                    "items": [
+                        {"id": "ta-1", "name": "Deep Cut Artist", "popularity": 18, "genres": ["indie"]},
+                        {"id": "ta-2", "name": "Cult Favorite", "popularity": 25, "genres": ["alt"]},
+                    ]
+                },
+            )
+        return _FakeResponse(200, {"items": []})
+
+    svc = ListeningService(
+        client_id="cid",
+        redirect_uri="http://localhost:8080/callback",
+        post_request=fake_post,
+        get_request=fake_get,
+    )
+
+    import time
+    svc._sessions["user-1"] = {
+        "access_token": "tok",
+        "expires_at": time.time() + 3600,
+        "display_name": "Tester",
+    }
+
+    recs = svc.get_artist_recommendations("user-1", max_results=5)
+    names = [r["name"] for r in recs]
+
+    assert recs
+    assert "Deep Cut Artist" in names
