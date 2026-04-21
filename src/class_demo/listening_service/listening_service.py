@@ -253,16 +253,16 @@ class ListeningService:
     ) -> List[Dict[str, object]]:
         """Recommend lesser-known artists based on the user's Spotify top tracks.
 
-          Algorithm (with fallbacks):
-          1. Fetch the user's top 50 tracks to collect unique seed artist IDs.
-          2. Fetch the user's top artists to improve known-artist exclusion.
-          2. Query related-artists for up to 12 seeds.
-          3. If sparse, call recommendations endpoint using seed artists, then enrich
-              artist IDs via /artists?ids=... so we can rank by popularity.
-          4. Remove already-known artists where possible, de-duplicate, and rank by
-              ascending popularity so the least-mainstream artists appear first.
+        Algorithm (using only non-deprecated Spotify endpoints):
+        1. Fetch the user's top 50 tracks across short, medium, and long term.
+        2. Fetch the user's top 50 artists (medium term) to build an exclusion set.
+        3. Collect all unique artist IDs that appear on those tracks.
+        4. Enrich via /v1/artists?ids=... to get popularity and genres.
+        5. Exclude artists already in the top-artists list.
+        6. Filter to popularity_max, rank ascending so least-mainstream come first.
 
-        popularity_max=60 targets artists below mainstream chart level (70+).
+        This approach avoids /related-artists and /recommendations which Spotify
+        deprecated in November 2024 and now return 403 for most app types.
         """
         if not self.is_connected(user_id):
             raise SpotifyConnectionError("Spotify is not connected. Complete secure connection first.")
@@ -270,50 +270,45 @@ class ListeningService:
         token = str(self._sessions[user_id]["access_token"])
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Step 1 – fetch top tracks (raw) to extract artist IDs
-        response = self._get_request(
-            self._TOP_TRACKS_URL,
-            headers=headers,
-            params={"limit": 50, "time_range": "medium_term"},
-            timeout=self.timeout_seconds,
-        )
-        if response.status_code != 200:
-            if response.status_code == 401:
+        # Step 1 – collect track-artists across all three time ranges for breadth
+        track_artist_ids: List[str] = []
+        track_artist_map: Dict[str, str] = {}  # id -> name (for fallback display)
+        for time_range in ("short_term", "medium_term", "long_term"):
+            resp = self._get_request(
+                self._TOP_TRACKS_URL,
+                headers=headers,
+                params={"limit": 50, "time_range": time_range},
+                timeout=self.timeout_seconds,
+            )
+            if resp.status_code == 401:
                 self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Failed to fetch top tracks for recommendations.")
+            if resp.status_code != 200:
+                continue
+            for item in resp.json().get("items", []):
+                for artist in item.get("artists", []):
+                    aid = artist.get("id")
+                    aname = (artist.get("name") or "").strip()
+                    if aid and aid not in track_artist_map:
+                        track_artist_ids.append(aid)
+                        track_artist_map[aid] = aname
+
+        if not track_artist_ids:
             raise SpotifyConnectionError("Failed to fetch top tracks for recommendations.")
 
-        items = response.json().get("items", [])
-
-        seen_ids: set = set()
-        seed_artists: List[tuple] = []      # (artist_id, artist_name)
-        seed_artist_ids: set = set()
-        seed_primary_names: set = set()
-        top_artist_names: set = set()       # lower-cased top-artist names already known to user
-
-        for item in items:
-            primary_name = ""
-            if item.get("artists"):
-                primary_name = (item.get("artists")[0].get("name") or "").strip()
-            if primary_name:
-                seed_primary_names.add(primary_name.lower())
-
-            for artist in item.get("artists", []):
-                aid = artist.get("id")
-                aname = (artist.get("name") or "").strip()
-                if aid and aid not in seen_ids:
-                    seen_ids.add(aid)
-                    seed_artists.append((aid, aname))
-                    seed_artist_ids.add(aid)
-
+        # Step 2 – build exclusion set from the user's top artists (well-known to them)
         top_artist_ids: set = set()
-        top_artists_resp = self._get_request(
-            self._TOP_ARTISTS_URL,
-            headers=headers,
-            params={"limit": 50, "time_range": "medium_term"},
-            timeout=self.timeout_seconds,
-        )
-        if top_artists_resp.status_code == 200:
-            for artist in top_artists_resp.json().get("items", []):
+        top_artist_names: set = set()
+        for time_range in ("short_term", "medium_term", "long_term"):
+            top_resp = self._get_request(
+                self._TOP_ARTISTS_URL,
+                headers=headers,
+                params={"limit": 50, "time_range": time_range},
+                timeout=self.timeout_seconds,
+            )
+            if top_resp.status_code != 200:
+                continue
+            for artist in top_resp.json().get("items", []):
                 aid = artist.get("id")
                 aname = (artist.get("name") or "").strip()
                 if aid:
@@ -321,125 +316,71 @@ class ListeningService:
                 if aname:
                     top_artist_names.add(aname.lower())
 
-        def _add_candidate(artist_obj: Dict[str, object]) -> None:
-            ra_id = artist_obj.get("id")
-            ra_name = str((artist_obj.get("name") or "")).strip()
-            if not ra_id or not ra_name:
-                return
-            if (
-                ra_id in seed_artist_ids
-                or ra_id in top_artist_ids
-                or ra_name.lower() in seed_primary_names
-                or ra_name.lower() in top_artist_names
-            ):
-                return
-            if ra_id in candidates:
-                return
-
-            popularity_val = artist_obj.get("popularity")
-            try:
-                popularity_num = int(popularity_val) if popularity_val is not None else None
-            except (TypeError, ValueError):
-                popularity_num = None
-
-            genres = artist_obj.get("genres") or []
-            genre_text = ", ".join(genres[:3]) if genres else "Unknown"
-            candidates[ra_id] = {
-                "name": ra_name,
-                "popularity": popularity_num,
-                "genres": genre_text,
-            }
-
-        # Step 2 – query related-artists for each seed (cap to reduce rate-limit pressure)
+        # Step 3 – enrich all unique track-artist IDs via batch /artists?ids=...
         candidates: Dict[str, Dict] = {}
-
-        for artist_id, _ in seed_artists[:12]:
-            rel_url = f"https://api.spotify.com/v1/artists/{artist_id}/related-artists"
-            rel_resp = self._get_request(rel_url, headers=headers, timeout=self.timeout_seconds)
-            if rel_resp.status_code != 200:
-                continue
-            for ra in rel_resp.json().get("artists", []):
-                _add_candidate(ra)
-
-        # Step 3 – fallback via recommendations endpoint + artist enrichment.
-        if seed_artists:
-            seed_ids = [aid for aid, _ in seed_artists[:5]]
-            rec_resp = self._get_request(
-                self._RECOMMENDATIONS_URL,
+        dedup_ids = list(dict.fromkeys(track_artist_ids))  # preserve insertion order
+        for i in range(0, len(dedup_ids), 50):
+            chunk = dedup_ids[i : i + 50]
+            artist_resp = self._get_request(
+                self._ARTISTS_URL,
                 headers=headers,
-                params={
-                    "seed_artists": ",".join(seed_ids),
-                    "limit": 100,
-                    "max_popularity": min(popularity_max + 20, 100),
-                },
+                params={"ids": ",".join(chunk)},
                 timeout=self.timeout_seconds,
             )
-            if rec_resp.status_code == 200:
-                rec_artist_ids: List[str] = []
-                rec_raw_candidates: List[Dict[str, object]] = []
-                for track in rec_resp.json().get("tracks", []):
-                    for artist in track.get("artists", []):
-                        ra_id = artist.get("id")
-                        ra_name = (artist.get("name") or "").strip()
-                        if (
-                            ra_id
-                            and ra_name
-                            and ra_id not in top_artist_ids
-                            and ra_name.lower() not in top_artist_names
-                        ):
-                            rec_artist_ids.append(ra_id)
-                            rec_raw_candidates.append({
-                                "id": ra_id,
-                                "name": ra_name,
-                            })
+            if artist_resp.status_code != 200:
+                continue
+            for artist in artist_resp.json().get("artists", []):
+                if not artist:
+                    continue
+                aid = artist.get("id")
+                aname = str((artist.get("name") or "")).strip()
+                if not aid or not aname:
+                    continue
+                # Exclude artists the user already considers their "top" artists
+                if aid in top_artist_ids or aname.lower() in top_artist_names:
+                    continue
+                if aid in candidates:
+                    continue
 
-                # If enrichment endpoints fail, keep raw recommendation artists
-                # so users still get meaningful suggestions instead of an empty set.
-                if not candidates:
-                    for raw in rec_raw_candidates:
-                        _add_candidate(raw)
+                popularity_val = artist.get("popularity")
+                try:
+                    popularity_num = int(popularity_val) if popularity_val is not None else None
+                except (TypeError, ValueError):
+                    popularity_num = None
 
-                # De-duplicate while preserving order.
-                dedup_ids = list(dict.fromkeys(rec_artist_ids))
-                for i in range(0, len(dedup_ids), 50):
-                    chunk = dedup_ids[i : i + 50]
-                    artist_resp = self._get_request(
-                        self._ARTISTS_URL,
-                        headers=headers,
-                        params={"ids": ",".join(chunk)},
-                        timeout=self.timeout_seconds,
-                    )
-                    if artist_resp.status_code != 200:
-                        continue
-                    for artist in artist_resp.json().get("artists", []):
-                        if not artist:
-                            continue
-                        _add_candidate(artist)
+                genres = artist.get("genres") or []
+                genre_text = ", ".join(genres[:3]) if genres else "Unknown"
+                candidates[aid] = {
+                    "name": aname,
+                    "popularity": popularity_num,
+                    "genres": genre_text,
+                }
 
-        # Step 5 – filter and rank with a relaxed fallback threshold.
-        filtered = [v for v in candidates.values() if v["popularity"] is not None and v["popularity"] <= popularity_max]
+        # Step 4 – filter and rank with a relaxed fallback threshold.
+        filtered = [
+            v for v in candidates.values()
+            if v["popularity"] is not None and v["popularity"] <= popularity_max
+        ]
         if not filtered:
             filtered = [
-                v
-                for v in candidates.values()
+                v for v in candidates.values()
                 if v["popularity"] is not None and v["popularity"] <= min(popularity_max + 20, 100)
             ]
         if not filtered:
             filtered = [v for v in candidates.values() if v["popularity"] is not None]
 
-        # If every candidate is missing metadata, do a soft fallback instead of
-        # fabricating neutral values that look broken in the UI.
+        # Final fallback: artists whose popularity Spotify did not return
         if not filtered:
             filtered = [
                 {
                     "name": v["name"],
-                    "popularity": "Unknown",
+                    "popularity": None,
                     "genres": v["genres"],
                 }
                 for v in candidates.values()
             ]
 
-        filtered.sort(key=lambda x: x["popularity"])
+        filtered.sort(key=lambda x: (x["popularity"] is None, x["popularity"] or 0))
         return filtered[:max_results]
 
     def refresh_session_with_refresh_token(self, user_id: str, refresh_token: str) -> bool:
