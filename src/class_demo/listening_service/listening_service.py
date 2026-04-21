@@ -235,7 +235,7 @@ class ListeningService:
                 {
                     "title": str(item.get("name", "Unknown")),
                     "artist": artist_names,
-                    "plays": "-",
+                    "plays": str(item.get("popularity", "N/A")),
                 }
             )
         return tracks
@@ -249,12 +249,14 @@ class ListeningService:
         """Recommend lesser-known artists based on the user's Spotify top tracks.
 
         Algorithm:
-        1. Fetch the user's top 20 tracks to collect unique seed artist IDs.
-        2. For up to 5 seed artists query Spotify's related-artists endpoint.
+          1. Fetch the user's top 50 tracks to collect unique seed artist IDs.
+          2. For up to 12 seed artists query Spotify's related-artists endpoint.
         3. Remove any artist already present in the user's own top artists.
         4. Keep only artists whose Spotify popularity score is <= popularity_max.
-        5. De-duplicate and sort ascending by popularity (most underground first).
-        6. Return up to max_results results.
+          5. If strict filtering returns nothing, fall back to the least-popular
+              related artists so users still get recommendations.
+          6. De-duplicate and sort ascending by popularity (most underground first).
+          7. Return up to max_results results.
 
         popularity_max=60 targets artists below mainstream chart level (70+).
         """
@@ -268,7 +270,7 @@ class ListeningService:
         response = self._get_request(
             self._TOP_TRACKS_URL,
             headers=headers,
-            params={"limit": 20, "time_range": "medium_term"},
+            params={"limit": 50, "time_range": "medium_term"},
             timeout=self.timeout_seconds,
         )
         if response.status_code != 200:
@@ -291,10 +293,10 @@ class ListeningService:
                     seed_artists.append((aid, aname))
                     top_artist_names.add(aname.lower())
 
-        # Step 2 – query related-artists for each seed (cap at 5 to avoid rate limits)
+        # Step 2 – query related-artists for each seed (cap to reduce rate-limit pressure)
         candidates: Dict[str, Dict] = {}
 
-        for artist_id, _ in seed_artists[:5]:
+        for artist_id, _ in seed_artists[:12]:
             rel_url = f"https://api.spotify.com/v1/artists/{artist_id}/related-artists"
             rel_resp = self._get_request(rel_url, headers=headers, timeout=self.timeout_seconds)
             if rel_resp.status_code != 200:
@@ -312,8 +314,13 @@ class ListeningService:
                         "genres": ", ".join(genres[:3]) if genres else "—",
                     }
 
-        # Step 3 – filter by popularity threshold, sort ascending, truncate
+        # Step 3 – filter by popularity threshold
         filtered = [v for v in candidates.values() if v["popularity"] <= popularity_max]
+
+        # Fallback: if strict threshold is too restrictive, return least-popular candidates.
+        if not filtered:
+            filtered = list(candidates.values())
+
         filtered.sort(key=lambda x: x["popularity"])
         return filtered[:max_results]
 

@@ -147,3 +147,8 @@ def test_recommendations_requires_connection():
     )
     with pytest.raises(SpotifyConnectionError, match="not connected"):
         svc.get_artist_recommendations("user-nobody")
+
+
+def test_recommendations_fallback_when_threshold_too_low(connected_service):
+    recs = connected_service.get_artist_recommendations("user-1", popularity_max=5)
+    assert recs, "Expected fallback recommendations when strict threshold yields none"

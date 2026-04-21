@@ -22,7 +22,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
         columns = [
             {"name": "title", "label": "Track", "field": "title", "align": "left"},
             {"name": "artist", "label": "Artist", "field": "artist", "align": "left"},
-            {"name": "plays", "label": "Plays", "field": "plays", "align": "right"},
+            {"name": "plays", "label": "Popularity", "field": "plays", "align": "right"},
         ]
         tracks_container = ui.column().classes("w-full")
 
