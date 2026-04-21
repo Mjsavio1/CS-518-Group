@@ -21,10 +21,17 @@ def render_listening_module(controller: ListeningController) -> None:
 
         def on_connect():
             status_label.set_text(controller.get_greeting())
-            tracks = controller.get_top_tracks()
             tracks_container.clear()
-            with tracks_container:
-                ui.label("Your Top Tracks").classes("text-h6 mt-2")
-                ui.table(columns=columns, rows=tracks).classes("w-full")
+            try:
+                tracks = controller.get_top_tracks()
+                with tracks_container:
+                    if not tracks:
+                        ui.label("No listening history found. Start playing some music on Spotify!").classes("text-grey")
+                    else:
+                        ui.label("Your Top Tracks").classes("text-h6 mt-2")
+                        ui.table(columns=columns, rows=tracks).classes("w-full")
+            except Exception as e:
+                with tracks_container:
+                    ui.label(f"Failed to load tracks. Please try again.").classes("text-negative")
 
         ui.button("Connect to Spotify", on_click=on_connect).props("icon=music_note color=green")
