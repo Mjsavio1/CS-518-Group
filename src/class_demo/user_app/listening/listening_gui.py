@@ -26,8 +26,6 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
         ]
         tracks_container = ui.column().classes("w-full")
 
-        auth_url_input = ui.input("Secure Spotify Login URL", value="").props("readonly").classes("w-full")
-
         def refresh_tracks() -> None:
             if not current_user.id:
                 tracks_container.clear()
@@ -45,24 +43,17 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 ui.label("Your Top Tracks").classes("text-h6 mt-2")
                 ui.table(columns=columns, rows=tracks).classes("w-full")
 
-        def generate_secure_link() -> None:
+        def connect_spotify() -> None:
             if not current_user.id:
                 ui.notify("Cannot connect Spotify: user ID is missing.", type="negative")
                 return
             try:
                 auth_url = controller.start_secure_connection(current_user.id)
-                auth_url_input.set_value(auth_url)
-                status_label.set_text("Secure link generated. Open it and approve access; callback completes automatically.")
-                ui.notify("Secure Spotify link generated.", type="positive")
+                status_label.set_text("Redirecting to Spotify secure login; callback completes automatically after approval.")
+                ui.notify("Opening Spotify secure login.", type="positive")
+                ui.navigate.to(auth_url)
             except Exception as exc:
                 ui.notify(str(exc), type="negative")
-
-        def open_spotify_login() -> None:
-            auth_url = auth_url_input.value or ""
-            if not auth_url:
-                ui.notify("Generate the secure link first.", type="warning")
-                return
-            ui.navigate.to(auth_url)
 
         def disconnect_spotify() -> None:
             if not current_user.id:
@@ -74,8 +65,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
             ui.notify("Spotify session removed.", type="positive")
 
         with ui.row().classes("items-center gap-3"):
-            ui.button("1) Generate Secure Link", on_click=generate_secure_link).props("icon=security color=green")
-            ui.button("2) Open Spotify Login", on_click=open_spotify_login).props("icon=open_in_new color=primary")
+            ui.button("Connect Spotify", on_click=connect_spotify).props("icon=security color=green")
             ui.button("Disconnect", on_click=disconnect_spotify).props("icon=logout color=negative")
 
         with ui.row().classes("items-center gap-3"):
