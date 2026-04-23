@@ -30,6 +30,7 @@ class ListeningService:
     _TOP_ARTISTS_URL = "https://api.spotify.com/v1/me/top/artists"
     _RECOMMENDATIONS_URL = "https://api.spotify.com/v1/recommendations"
     _ARTISTS_URL = "https://api.spotify.com/v1/artists"
+    _SEARCH_URL = "https://api.spotify.com/v1/search"
     _DEFAULT_SCOPE = " ".join(
         [
             "user-top-read",
@@ -288,34 +289,187 @@ class ListeningService:
                 raise SpotifyConnectionError("Spotify access expired while starting playback. Please reconnect.")
             raise SpotifyConnectionError(f"Spotify playback failed ({response.status_code}).")
 
-    def get_artist_recommendations(
+    def get_song_recommendations(
         self,
         user_id: str,
         max_results: int = 10,
-        popularity_max: int = 60,
+        popularity_max: int = 65,
     ) -> List[Dict[str, object]]:
-        """Recommend lesser-known artists based on the user's Spotify top tracks.
-
-        Algorithm (using only non-deprecated Spotify endpoints):
-        1. Fetch the user's top 50 tracks across short, medium, and long term.
-        2. Fetch the user's top 50 artists (medium term) to build an exclusion set.
-        3. Collect all unique artist IDs that appear on those tracks.
-        4. Enrich via /v1/artists?ids=... to get popularity and genres.
-        5. Exclude artists already in the top-artists list.
-        6. Filter to popularity_max, rank ascending so least-mainstream come first.
-
-        This approach avoids /related-artists and /recommendations which Spotify
-        deprecated in November 2024 and now return 403 for most app types.
-        """
+        """Recommend lesser-known songs based on user taste genres, excluding known tracks/artists."""
         if not self.is_connected(user_id):
             raise SpotifyConnectionError("Spotify is not connected. Complete secure connection first.")
 
         token = str(self._sessions[user_id]["access_token"])
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Step 1 – collect track-artists across all three time ranges for breadth
+        listened_track_ids: set[str] = set()
+        listened_artist_ids: set[str] = set()
+        top_artist_ids: set[str] = set()
+        seed_genres: Dict[str, int] = {}
+
+        # Build listening history context from top tracks across ranges.
+        for time_range in ("short_term", "medium_term", "long_term"):
+            resp = self._get_request(
+                self._TOP_TRACKS_URL,
+                headers=headers,
+                params={"limit": 50, "time_range": time_range},
+                timeout=self.timeout_seconds,
+            )
+            if resp.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
+            if resp.status_code != 200:
+                continue
+            for item in resp.json().get("items", []):
+                tid = item.get("id")
+                if tid:
+                    listened_track_ids.add(str(tid))
+                for artist in item.get("artists", []):
+                    aid = artist.get("id")
+                    if aid:
+                        listened_artist_ids.add(str(aid))
+
+        # Build exclusions and genre seeds from top artists across ranges.
+        for time_range in ("short_term", "medium_term", "long_term"):
+            top_resp = self._get_request(
+                self._TOP_ARTISTS_URL,
+                headers=headers,
+                params={"limit": 50, "time_range": time_range},
+                timeout=self.timeout_seconds,
+            )
+            if top_resp.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
+            if top_resp.status_code != 200:
+                continue
+            for artist in top_resp.json().get("items", []):
+                aid = artist.get("id")
+                if aid:
+                    top_artist_ids.add(str(aid))
+                for genre in artist.get("genres", []) or []:
+                    g = str(genre).strip().lower()
+                    if g:
+                        seed_genres[g] = seed_genres.get(g, 0) + 1
+
+        genre_pool = [g for g, _ in sorted(seed_genres.items(), key=lambda kv: kv[1], reverse=True)]
+        if not genre_pool:
+            genre_pool = ["indie", "alternative", "rock", "dance pop", "modern rock"]
+
+        raw_candidates: Dict[str, Dict[str, object]] = {}
+        artist_ids_for_enrichment: set[str] = set()
+
+        for genre in genre_pool[:8]:
+            search_resp = self._get_request(
+                self._SEARCH_URL,
+                headers=headers,
+                params={
+                    "q": f'genre:"{genre}"',
+                    "type": "track",
+                    "limit": 50,
+                    "market": "US",
+                },
+                timeout=self.timeout_seconds,
+            )
+            if search_resp.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
+            if search_resp.status_code != 200:
+                continue
+
+            items = (search_resp.json().get("tracks") or {}).get("items", [])
+            for track in items:
+                tid = str(track.get("id") or "")
+                if not tid or tid in raw_candidates or tid in listened_track_ids:
+                    continue
+
+                artists = track.get("artists") or []
+                primary_artist = artists[0] if artists else {}
+                artist_id = str(primary_artist.get("id") or "")
+                artist_name = str(primary_artist.get("name") or "Unknown Artist")
+                if artist_id and (artist_id in top_artist_ids or artist_id in listened_artist_ids):
+                    continue
+
+                popularity_val = track.get("popularity")
+                try:
+                    popularity_num = int(popularity_val) if popularity_val is not None else None
+                except (TypeError, ValueError):
+                    popularity_num = None
+
+                raw_candidates[tid] = {
+                    "track": str(track.get("name") or "Unknown Track"),
+                    "artist": artist_name,
+                    "popularity": popularity_num,
+                    "genre": str(genre),
+                    "artist_id": artist_id,
+                }
+                if artist_id:
+                    artist_ids_for_enrichment.add(artist_id)
+
+        if not raw_candidates:
+            return []
+
+        # Enrich genres from artist metadata so we don't default to Unknown.
+        artist_genre_map: Dict[str, str] = {}
+        ids_list = list(artist_ids_for_enrichment)
+        for i in range(0, len(ids_list), 50):
+            chunk = ids_list[i : i + 50]
+            artist_resp = self._get_request(
+                self._ARTISTS_URL,
+                headers=headers,
+                params={"ids": ",".join(chunk)},
+                timeout=self.timeout_seconds,
+            )
+            if artist_resp.status_code != 200:
+                continue
+            for artist in artist_resp.json().get("artists", []):
+                if not artist:
+                    continue
+                aid = str(artist.get("id") or "")
+                genres = artist.get("genres") or []
+                if aid:
+                    artist_genre_map[aid] = ", ".join(genres[:3]) if genres else "Unknown"
+
+        candidates = list(raw_candidates.values())
+        for row in candidates:
+            aid = str(row.get("artist_id") or "")
+            if aid and artist_genre_map.get(aid):
+                row["genre"] = artist_genre_map[aid]
+            row.pop("artist_id", None)
+
+        strict = [
+            row for row in candidates
+            if row["popularity"] is not None and int(row["popularity"]) <= popularity_max
+        ]
+        if len(strict) >= max_results:
+            strict.sort(key=lambda r: int(r["popularity"]))
+            return strict[:max_results]
+
+        relaxed = [
+            row for row in candidates
+            if row["popularity"] is not None and int(row["popularity"]) <= min(popularity_max + 20, 100)
+        ]
+        if len(relaxed) >= max_results:
+            relaxed.sort(key=lambda r: int(r["popularity"]))
+            return relaxed[:max_results]
+
+        # Last fallback: return whatever we found, still sorted least-popular first.
+        candidates.sort(key=lambda r: (r["popularity"] is None, int(r["popularity"] or 0)))
+        return candidates[:max_results]
+
+    def get_artist_recommendations(
+        self,
+        user_id: str,
+        max_results: int = 10,
+        popularity_max: int = 65,
+    ) -> List[Dict[str, object]]:
+        """Artist recommendation path kept for backward compatibility and tests."""
+        if not self.is_connected(user_id):
+            raise SpotifyConnectionError("Spotify is not connected. Complete secure connection first.")
+
+        token = str(self._sessions[user_id]["access_token"])
+        headers = {"Authorization": f"Bearer {token}"}
+
         track_artist_ids: List[str] = []
-        track_artist_map: Dict[str, str] = {}  # id -> name (for fallback display)
         for time_range in ("short_term", "medium_term", "long_term"):
             resp = self._get_request(
                 self._TOP_TRACKS_URL,
@@ -331,18 +485,14 @@ class ListeningService:
             for item in resp.json().get("items", []):
                 for artist in item.get("artists", []):
                     aid = artist.get("id")
-                    aname = (artist.get("name") or "").strip()
-                    if aid and aid not in track_artist_map:
-                        track_artist_ids.append(aid)
-                        track_artist_map[aid] = aname
+                    if aid:
+                        track_artist_ids.append(str(aid))
 
         if not track_artist_ids:
-            raise SpotifyConnectionError("Failed to fetch top tracks for recommendations.")
+            return []
 
-        # Step 2 – build exclusion set from the user's top artists (well-known to them)
-        top_artist_ids: set = set()
-        top_artist_names: set = set()
-        top_artist_fallback: Dict[str, Dict] = {}
+        top_artist_ids: set[str] = set()
+        top_artist_names: set[str] = set()
         for time_range in ("short_term", "medium_term", "long_term"):
             top_resp = self._get_request(
                 self._TOP_ARTISTS_URL,
@@ -350,34 +500,18 @@ class ListeningService:
                 params={"limit": 50, "time_range": time_range},
                 timeout=self.timeout_seconds,
             )
-            if top_resp.status_code == 401:
-                self._sessions.pop(user_id, None)
-                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
             if top_resp.status_code != 200:
                 continue
             for artist in top_resp.json().get("items", []):
                 aid = artist.get("id")
-                aname = (artist.get("name") or "").strip()
+                aname = str(artist.get("name") or "").strip().lower()
                 if aid:
-                    top_artist_ids.add(aid)
+                    top_artist_ids.add(str(aid))
                 if aname:
-                    top_artist_names.add(aname.lower())
-                    popularity_val = artist.get("popularity")
-                    try:
-                        popularity_num = int(popularity_val) if popularity_val is not None else None
-                    except (TypeError, ValueError):
-                        popularity_num = None
-                    genres = artist.get("genres") or []
-                    top_artist_fallback[aname.lower()] = {
-                        "name": aname,
-                        "popularity": popularity_num,
-                        "genres": ", ".join(genres[:3]) if genres else "Unknown",
-                    }
+                    top_artist_names.add(aname)
 
-        # Step 3 – enrich all unique track-artist IDs via batch /artists?ids=...
-        candidates: Dict[str, Dict] = {}
-        all_enriched: Dict[str, Dict] = {}
-        dedup_ids = list(dict.fromkeys(track_artist_ids))  # preserve insertion order
+        candidates: Dict[str, Dict[str, object]] = {}
+        dedup_ids = list(dict.fromkeys(track_artist_ids))
         for i in range(0, len(dedup_ids), 50):
             chunk = dedup_ids[i : i + 50]
             artist_resp = self._get_request(
@@ -386,89 +520,44 @@ class ListeningService:
                 params={"ids": ",".join(chunk)},
                 timeout=self.timeout_seconds,
             )
-            if artist_resp.status_code == 401:
-                self._sessions.pop(user_id, None)
-                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
             if artist_resp.status_code != 200:
                 continue
             for artist in artist_resp.json().get("artists", []):
                 if not artist:
                     continue
-                aid = artist.get("id")
-                aname = str((artist.get("name") or "")).strip()
+                aid = str(artist.get("id") or "")
+                aname = str(artist.get("name") or "").strip()
                 if not aid or not aname:
+                    continue
+                if aid in top_artist_ids or aname.lower() in top_artist_names:
                     continue
                 popularity_val = artist.get("popularity")
                 try:
                     popularity_num = int(popularity_val) if popularity_val is not None else None
                 except (TypeError, ValueError):
                     popularity_num = None
-
                 genres = artist.get("genres") or []
-                genre_text = ", ".join(genres[:3]) if genres else "Unknown"
-                all_enriched[aid] = {
-                    "name": aname,
-                    "popularity": popularity_num,
-                    "genres": genre_text,
-                }
-
-                # Exclude artists the user already considers their "top" artists
-                if aid in top_artist_ids or aname.lower() in top_artist_names:
-                    continue
-                if aid in candidates:
-                    continue
                 candidates[aid] = {
                     "name": aname,
                     "popularity": popularity_num,
-                    "genres": genre_text,
+                    "genres": ", ".join(genres[:3]) if genres else "Unknown",
                 }
 
-        if not candidates and all_enriched:
-            # Fallback: if exclusion is too strict for this account, use enriched artists directly.
-            candidates = dict(all_enriched)
+        rows = list(candidates.values())
+        strict = [r for r in rows if r["popularity"] is not None and int(r["popularity"]) <= popularity_max]
+        if strict:
+            strict.sort(key=lambda r: int(r["popularity"]))
+            return strict[:max_results]
 
-        # Step 4 – filter and rank with a relaxed fallback threshold.
-        filtered = [
-            v for v in candidates.values()
-            if v["popularity"] is not None and v["popularity"] <= popularity_max
+        relaxed = [
+            r for r in rows if r["popularity"] is not None and int(r["popularity"]) <= min(popularity_max + 20, 100)
         ]
-        if not filtered:
-            filtered = [
-                v for v in candidates.values()
-                if v["popularity"] is not None and v["popularity"] <= min(popularity_max + 20, 100)
-            ]
-        if not filtered:
-            filtered = [v for v in candidates.values() if v["popularity"] is not None]
+        if relaxed:
+            relaxed.sort(key=lambda r: int(r["popularity"]))
+            return relaxed[:max_results]
 
-        # Final fallback: artists whose popularity Spotify did not return
-        if not filtered:
-            filtered = [
-                {
-                    "name": v["name"],
-                    "popularity": None,
-                    "genres": v["genres"],
-                }
-                for v in candidates.values()
-            ]
-
-        if not filtered and top_artist_fallback:
-            # Last-resort fallback so the section is still useful on sparse/new accounts.
-            filtered = list(top_artist_fallback.values())
-
-        if not filtered and track_artist_map:
-            # Absolute fallback: return unique artists seen in top tracks.
-            filtered = [
-                {
-                    "name": name,
-                    "popularity": None,
-                    "genres": "Unknown",
-                }
-                for name in track_artist_map.values()
-                if name
-            ]
-
-        filtered.sort(key=lambda x: (x["popularity"] is None, x["popularity"] or 0))
-        return filtered[:max_results]
+        rows.sort(key=lambda r: (r["popularity"] is None, int(r["popularity"] or 0)))
+        return rows[:max_results]
 
     def refresh_session_with_refresh_token(self, user_id: str, refresh_token: str) -> bool:
         """Exchange a stored refresh token for a fresh access token and populate session."""

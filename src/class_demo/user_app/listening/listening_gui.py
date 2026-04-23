@@ -152,13 +152,6 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             )
                             device_id = await ui.run_javascript("return window._spotifyDeviceId || null;")
                             if not device_id:
-                                # Give the SDK a moment to report ready and populate device ID.
-                                device_id = await ui.run_javascript(
-                                    "return new Promise(function(resolve){"
-                                    "setTimeout(function(){resolve(window._spotifyDeviceId || null);}, 1500);"
-                                    "});"
-                                )
-                            if not device_id:
                                 await ui.run_javascript(
                                     "var el=document.getElementById('spotify-now-playing');"
                                     "if(el){el.textContent='Web player device not ready yet. Click again.';}"
@@ -291,16 +284,17 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
         # ----------------------------------------
 
         ui.separator()
-        ui.label("Discover Lesser-Known Artists").classes("text-h6")
+        ui.label("Discover Lesser-Known Songs").classes("text-h6")
         ui.label(
-            "Based on your top tracks, these artists are similar to what you like "
-            "but have a lower mainstream popularity score."
+            "Based on your listening profile, these songs come from less familiar artists "
+            "with lower popularity." 
         ).classes("text-caption text-grey")
 
         rec_columns = [
-            {"name": "name",       "label": "Artist",     "field": "name",       "align": "left"},
+            {"name": "track",      "label": "Song",       "field": "track",      "align": "left"},
+            {"name": "artist",     "label": "Artist",     "field": "artist",     "align": "left"},
             {"name": "popularity", "label": "Popularity", "field": "popularity", "align": "center"},
-            {"name": "genres",     "label": "Genres",     "field": "genres",     "align": "left"},
+            {"name": "genre",      "label": "Genre",      "field": "genre",      "align": "left"},
         ]
         rec_container = ui.column().classes("w-full")
 
@@ -309,18 +303,18 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 ui.notify("Cannot load recommendations: user session missing.", type="negative")
                 return
             try:
-                recs = controller.get_artist_recommendations_resilient(
+                recs = controller.get_song_recommendations_resilient(
                     user=current_user,
                     refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
                     max_results=10,
-                    popularity_max=60,
+                    popularity_max=65,
                 )
                 rec_container.clear()
                 with rec_container:
                     if recs:
                         ui.table(columns=rec_columns, rows=recs).classes("w-full")
                     else:
-                        ui.label("No lesser-known recommendations found. Try listening to more tracks first.").classes("text-grey")
+                        ui.label("No lesser-known song recommendations found. Try reconnecting Spotify and loading top tracks first.").classes("text-grey")
             except Exception as exc:
                 ui.notify(str(exc), type="negative")
 

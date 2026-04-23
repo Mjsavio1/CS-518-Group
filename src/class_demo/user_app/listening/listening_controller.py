@@ -117,23 +117,62 @@ class ListeningController:
         self,
         user_id: str,
         max_results: int = 10,
-        popularity_max: int = 60,
+        popularity_max: int = 65,
     ) -> List[Dict]:
-        """Return lesser-known artist recommendations based on the user's top tracks."""
+        """Backward-compatible wrapper for artist recommendations."""
         return self.service.get_artist_recommendations(
             user_id=user_id,
             max_results=max_results,
             popularity_max=popularity_max,
         )
 
+    def get_song_recommendations(
+        self,
+        user_id: str,
+        max_results: int = 10,
+        popularity_max: int = 65,
+    ) -> List[Dict]:
+        """Return lesser-known song recommendations based on the user's listening profile."""
+        return self.service.get_song_recommendations(
+            user_id=user_id,
+            max_results=max_results,
+            popularity_max=popularity_max,
+        )
+
+    def get_song_recommendations_resilient(
+        self,
+        user,
+        refresh_callback=None,
+        max_results: int = 10,
+        popularity_max: int = 65,
+    ) -> List[Dict]:
+        """Fetch song recommendations and retry once after token refresh when possible."""
+        try:
+            return self.service.get_song_recommendations(
+                user_id=user.id,
+                max_results=max_results,
+                popularity_max=popularity_max,
+            )
+        except Exception:
+            if refresh_callback and user and getattr(user, "spotify_refresh_token", None):
+                rt = refresh_callback(user)
+                if rt:
+                    self.service.refresh_session_with_refresh_token(user.id, rt)
+                    return self.service.get_song_recommendations(
+                        user_id=user.id,
+                        max_results=max_results,
+                        popularity_max=popularity_max,
+                    )
+            raise
+
     def get_artist_recommendations_resilient(
         self,
         user,
         refresh_callback=None,
         max_results: int = 10,
-        popularity_max: int = 60,
+        popularity_max: int = 65,
     ) -> List[Dict]:
-        """Fetch recommendations and retry once after token refresh when possible."""
+        """Backward-compatible resilient wrapper for artist recommendations."""
         try:
             return self.service.get_artist_recommendations(
                 user_id=user.id,
