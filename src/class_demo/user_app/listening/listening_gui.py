@@ -132,7 +132,11 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     track_uri = track.get("uri", "")
 
                     def _play(_, uri=track_uri) -> None:
-                        token = controller.get_access_token(current_user.id)
+                        token = controller.get_access_token_resilient(
+                            current_user,
+                            refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                            force_refresh=True,
+                        )
                         if not token:
                             ui.notify("Connect Spotify first.", type="warning")
                             return
@@ -226,11 +230,18 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
         with ui.row().classes("items-center gap-3"):
             ui.label("No track playing").classes("text-body1 text-grey").props("id=spotify-now-playing")
         with ui.row().classes("items-center gap-3"):
-            ui.button("Launch Web Player", on_click=lambda: (
-                _inject_web_player(controller.get_access_token(current_user.id))
-                if controller.get_access_token(current_user.id)
-                else ui.notify("Connect Spotify first.", type="warning")
-            )).props("icon=speaker color=green")
+            def launch_web_player() -> None:
+                token = controller.get_access_token_resilient(
+                    current_user,
+                    refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                    force_refresh=True,
+                )
+                if not token:
+                    ui.notify("Connect Spotify first.", type="warning")
+                    return
+                _inject_web_player(token)
+
+            ui.button("Launch Web Player", on_click=launch_web_player).props("icon=speaker color=green")
         # ----------------------------------------
 
         ui.separator()

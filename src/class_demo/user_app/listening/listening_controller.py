@@ -85,6 +85,23 @@ class ListeningController:
         """Return the Spotify access token for the user if connected."""
         return self.service.get_access_token(user_id)
 
+    def get_access_token_resilient(self, user, refresh_callback=None, force_refresh: bool = False) -> str | None:
+        """Return an access token and refresh once when needed (or when forced)."""
+        if not user or not getattr(user, "id", None):
+            return None
+
+        token = None if force_refresh else self.service.get_access_token(user.id)
+        if token:
+            return token
+
+        if refresh_callback and getattr(user, "spotify_refresh_token", None):
+            rt = refresh_callback(user)
+            if rt:
+                self.service.refresh_session_with_refresh_token(user.id, rt)
+                return self.service.get_access_token(user.id)
+
+        return self.service.get_access_token(user.id)
+
     def disconnect(self, user_id: str) -> None:
         self.service.disconnect(user_id)
 

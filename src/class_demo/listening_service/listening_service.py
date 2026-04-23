@@ -314,6 +314,7 @@ class ListeningService:
         # Step 2 – build exclusion set from the user's top artists (well-known to them)
         top_artist_ids: set = set()
         top_artist_names: set = set()
+        top_artist_fallback: Dict[str, Dict] = {}
         for time_range in ("short_term", "medium_term", "long_term"):
             top_resp = self._get_request(
                 self._TOP_ARTISTS_URL,
@@ -333,6 +334,17 @@ class ListeningService:
                     top_artist_ids.add(aid)
                 if aname:
                     top_artist_names.add(aname.lower())
+                    popularity_val = artist.get("popularity")
+                    try:
+                        popularity_num = int(popularity_val) if popularity_val is not None else None
+                    except (TypeError, ValueError):
+                        popularity_num = None
+                    genres = artist.get("genres") or []
+                    top_artist_fallback[aname.lower()] = {
+                        "name": aname,
+                        "popularity": popularity_num,
+                        "genres": ", ".join(genres[:3]) if genres else "Unknown",
+                    }
 
         # Step 3 – enrich all unique track-artist IDs via batch /artists?ids=...
         candidates: Dict[str, Dict] = {}
@@ -358,12 +370,6 @@ class ListeningService:
                 aname = str((artist.get("name") or "")).strip()
                 if not aid or not aname:
                     continue
-                # Exclude artists the user already considers their "top" artists
-                if aid in top_artist_ids or aname.lower() in top_artist_names:
-                    continue
-                if aid in candidates:
-                    continue
-
                 popularity_val = artist.get("popularity")
                 try:
                     popularity_num = int(popularity_val) if popularity_val is not None else None
@@ -377,6 +383,12 @@ class ListeningService:
                     "popularity": popularity_num,
                     "genres": genre_text,
                 }
+
+                # Exclude artists the user already considers their "top" artists
+                if aid in top_artist_ids or aname.lower() in top_artist_names:
+                    continue
+                if aid in candidates:
+                    continue
                 candidates[aid] = {
                     "name": aname,
                     "popularity": popularity_num,
@@ -410,6 +422,10 @@ class ListeningService:
                 }
                 for v in candidates.values()
             ]
+
+        if not filtered and top_artist_fallback:
+            # Last-resort fallback so the section is still useful on sparse/new accounts.
+            filtered = list(top_artist_fallback.values())
 
         filtered.sort(key=lambda x: (x["popularity"] is None, x["popularity"] or 0))
         return filtered[:max_results]
