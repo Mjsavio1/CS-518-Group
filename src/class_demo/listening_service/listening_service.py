@@ -209,6 +209,12 @@ class ListeningService:
             return False
         return True
 
+    def get_access_token(self, user_id: str) -> str | None:
+        """Return the current access token for the user if a valid session exists."""
+        if not self.is_connected(user_id):
+            return None
+        return str(self._sessions[user_id]["access_token"])
+
     def disconnect(self, user_id: str) -> None:
         self._pending_auth.pop(user_id, None)
         self._sessions.pop(user_id, None)
@@ -241,7 +247,8 @@ class ListeningService:
                     "title": str(item.get("name", "Unknown")),
                     "artist": artist_names,
                     "plays": popularity_display,
-                }
+                        "uri": str(item.get("uri", "")),
+                    }
             )
         return tracks
 
