@@ -36,7 +36,8 @@ def run_ui() -> None:
     ui.run(
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8080")),
-        title="User Auth Lab",
+        title="Nichetify",
+        favicon="static/icon.png",
         storage_secret=os.getenv("STORAGE_SECRET", os.urandom(24).hex()),
         show=False,
     )
