@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from nicegui import ui
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -37,7 +38,7 @@ def run_ui() -> None:
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8080")),
         title="Nichetify",
-        favicon="static/icon.png",
+        favicon=Path(__file__).parent / "static" / "icon.png",
         storage_secret=os.getenv("STORAGE_SECRET", os.urandom(24).hex()),
         show=False,
     )

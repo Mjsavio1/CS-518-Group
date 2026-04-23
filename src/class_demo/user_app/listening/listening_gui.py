@@ -87,6 +87,64 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 poll_duration()
                 # ----------------------------------
 
+        def _inject_web_player(access_token: str) -> None:
+            """Inject the Spotify Web Playback SDK and initialise the in-browser player."""
+            js = f"""
+(function() {{
+  if (window._spotifyPlayerReady) return;
+  window._spotifyAccessToken = {repr(access_token)};
+
+  window.onSpotifyWebPlaybackSDKReady = function() {{
+    var player = new Spotify.Player({{
+      name: 'Class Demo Web Player',
+      getOAuthToken: function(cb) {{ cb(window._spotifyAccessToken); }},
+      volume: 0.5
+    }});
+
+    player.addListener('ready', function(data) {{
+      window._spotifyDeviceId = data.device_id;
+      console.log('Spotify Web Player ready. Device ID:', data.device_id);
+      // Transfer playback to this device automatically
+      fetch('https://api.spotify.com/v1/me/player', {{
+        method: 'PUT',
+        headers: {{
+          'Authorization': 'Bearer ' + window._spotifyAccessToken,
+          'Content-Type': 'application/json'
+        }},
+        body: JSON.stringify({{ device_ids: [data.device_id], play: false }})
+      }});
+    }});
+
+    player.addListener('not_ready', function(data) {{
+      console.warn('Spotify Web Player device went offline:', data.device_id);
+    }});
+
+    player.addListener('player_state_changed', function(state) {{
+      if (!state) return;
+      var track = state.track_window.current_track;
+      var el = document.getElementById('spotify-now-playing');
+      if (el && track) {{
+        el.textContent = track.name + ' — ' + track.artists.map(function(a){{return a.name;}}).join(', ');
+      }}
+    }});
+
+    player.connect();
+    window._spotifyPlayer = player;
+    window._spotifyPlayerReady = true;
+  }};
+
+  if (typeof Spotify !== 'undefined') {{
+    window.onSpotifyWebPlaybackSDKReady();
+  }} else {{
+    var script = document.createElement('script');
+    script.src = 'https://sdk.scdn.co/spotify-player.js';
+    script.async = true;
+    document.head.appendChild(script);
+  }}
+}})();
+"""
+            ui.run_javascript(js)
+
         def connect_spotify() -> None:
             if not current_user.id:
                 ui.notify("Cannot connect Spotify: user ID is missing.", type="negative")
@@ -114,6 +172,19 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
 
         with ui.row().classes("items-center gap-3"):
             ui.button("Load Top Tracks", on_click=refresh_tracks).props("icon=queue_music color=secondary")
+
+        # --- Spotify Web Playback SDK player ---
+        ui.separator()
+        ui.label("Spotify Web Player").classes("text-h6")
+        with ui.row().classes("items-center gap-3"):
+            ui.label("No track playing").classes("text-body1 text-grey").props("id=spotify-now-playing")
+        with ui.row().classes("items-center gap-3"):
+            ui.button("Launch Web Player", on_click=lambda: (
+                _inject_web_player(controller.get_access_token(current_user.id))
+                if controller.get_access_token(current_user.id)
+                else ui.notify("Connect Spotify first.", type="warning")
+            )).props("icon=speaker color=green")
+        # ----------------------------------------
 
         ui.separator()
         ui.label("Discover Lesser-Known Artists").classes("text-h6")
