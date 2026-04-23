@@ -1,4 +1,4 @@
-from nicegui import ui
+]from nicegui import ui
 
 from ...user_service.models import User, UserRole
 from ..interfaces import AppLogic

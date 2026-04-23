@@ -52,7 +52,6 @@ class ListeningService:
         # Safety by design: tokens are never persisted to DB and are cleared on restart.
         self._pending_auth: Dict[str, Dict[str, object]] = {}
         self._sessions: Dict[str, Dict[str, object]] = {}
-        self._playlists_cache: List[Dict[str, object]] | None = None
         # allow injecting client_secret for testing or explicit config
         self.client_secret = client_secret or os.getenv("SPOTIFY_CLIENT_SECRET", "")
 
@@ -245,35 +244,6 @@ class ListeningService:
                 }
             )
         return tracks
-
-    def get_playlists(self) -> List[Dict[str, object]]:
-        """Return sample playlists for the playlist UI."""
-        if self._playlists_cache is None:
-            self._playlists_cache = [
-                {
-                    "name": "My Favorites",
-                    "tracks": [
-                        {"title": "Blinding Lights", "artist": "The Weeknd"},
-                        {"title": "As It Was", "artist": "Harry Styles"},
-                    ],
-                },
-                {
-                    "name": "Chill Vibes",
-                    "tracks": [
-                        {"title": "Anti-Hero", "artist": "Taylor Swift"},
-                        {"title": "Flowers", "artist": "Miley Cyrus"},
-                    ],
-                },
-            ]
-        return self._playlists_cache
-
-    def rename_playlist(self, index: int, new_name: str) -> bool:
-        """Rename a playlist by index in the cached playlist list."""
-        playlists = self.get_playlists()
-        if 0 <= index < len(playlists) and new_name.strip():
-            playlists[index]["name"] = new_name.strip()
-            return True
-        return False
 
     def get_artist_recommendations(
         self,

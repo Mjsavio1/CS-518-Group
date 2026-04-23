@@ -71,7 +71,6 @@ def init_pages(
 
     @ui.page("/signup")
     def signup_page():
-        _apply_theme()
         with ui.card().classes("absolute-center w-96"):
             ui.label("Create Account").classes("text-h6")
             email_input = ui.input("Email")
@@ -119,7 +118,6 @@ def init_pages(
 
     @ui.page("/callback")
     def spotify_callback_page(code: str | None = None, state: str | None = None, error: str | None = None):
-        _apply_theme()
         if not SessionManager.is_authenticated():
             ui.notify("Please log in before connecting Spotify.", type="negative")
             return ui.navigate.to("/login")
