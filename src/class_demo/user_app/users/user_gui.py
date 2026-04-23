@@ -1,4 +1,4 @@
-from nicegui import ui
+]from nicegui import ui
 
 from ...user_service.models import User, UserRole
 from ..interfaces import AppLogic
@@ -28,10 +28,16 @@ def render_user_module(logic: AppLogic, current_user: User) -> None:
         if current_user.role == UserRole.admin:
             with ui.tab_panel("Admin Panel"):
                 ui.label("All Registered Users").classes("text-h5")
-                users = logic.list_all_users(current_user)
-                columns = [
-                    {"name": "username", "label": "Username", "field": "username"},
-                    {"name": "email", "label": "Email", "field": "email"},
-                    {"name": "role", "label": "Role", "field": "role"},
-                ]
-                ui.table(columns=columns, rows=[u.dict() for u in users])
+                try:
+                    users = logic.list_all_users(current_user)
+                    if not users:
+                        ui.label("No registered users found.").classes("text-grey")
+                    else:
+                        columns = [
+                            {"name": "username", "label": "Username", "field": "username"},
+                            {"name": "email", "label": "Email", "field": "email"},
+                            {"name": "role", "label": "Role", "field": "role"},
+                        ]
+                        ui.table(columns=columns, rows=[u.dict() for u in users])
+                except Exception as e:
+                    ui.label("Failed to load users. Please try again.").classes("text-negative")
