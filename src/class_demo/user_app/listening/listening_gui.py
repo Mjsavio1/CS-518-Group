@@ -118,16 +118,10 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
         ).classes("w-full")
 
         settings = dict(current_user.settings)
-        theme_setting = str(settings.get("theme", "system"))
         notifications_enabled = bool(settings.get("notifications_enabled", True))
         autoplay_enabled = bool(settings.get("autoplay_enabled", True))
 
         with ui.row().classes("items-center gap-6"):
-            theme_select = ui.select(
-                options=["system", "light", "dark"],
-                value=theme_setting,
-                label="Theme",
-            )
             notifications_toggle = ui.switch("Notifications", value=notifications_enabled)
             autoplay_toggle = ui.switch("Autoplay", value=autoplay_enabled)
 
@@ -138,7 +132,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
 
             updated_settings = {
                 **settings,
-                "theme": theme_select.value,
+                "theme": "dark",
                 "notifications_enabled": bool(notifications_toggle.value),
                 "autoplay_enabled": bool(autoplay_toggle.value),
             }
