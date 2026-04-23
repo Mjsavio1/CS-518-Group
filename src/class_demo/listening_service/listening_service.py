@@ -321,6 +321,9 @@ class ListeningService:
                 params={"limit": 50, "time_range": time_range},
                 timeout=self.timeout_seconds,
             )
+            if top_resp.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
             if top_resp.status_code != 200:
                 continue
             for artist in top_resp.json().get("items", []):
@@ -333,6 +336,7 @@ class ListeningService:
 
         # Step 3 – enrich all unique track-artist IDs via batch /artists?ids=...
         candidates: Dict[str, Dict] = {}
+        all_enriched: Dict[str, Dict] = {}
         dedup_ids = list(dict.fromkeys(track_artist_ids))  # preserve insertion order
         for i in range(0, len(dedup_ids), 50):
             chunk = dedup_ids[i : i + 50]
@@ -342,6 +346,9 @@ class ListeningService:
                 params={"ids": ",".join(chunk)},
                 timeout=self.timeout_seconds,
             )
+            if artist_resp.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify session expired while loading recommendations. Reconnect and try again.")
             if artist_resp.status_code != 200:
                 continue
             for artist in artist_resp.json().get("artists", []):
@@ -365,11 +372,20 @@ class ListeningService:
 
                 genres = artist.get("genres") or []
                 genre_text = ", ".join(genres[:3]) if genres else "Unknown"
+                all_enriched[aid] = {
+                    "name": aname,
+                    "popularity": popularity_num,
+                    "genres": genre_text,
+                }
                 candidates[aid] = {
                     "name": aname,
                     "popularity": popularity_num,
                     "genres": genre_text,
                 }
+
+        if not candidates and all_enriched:
+            # Fallback: if exclusion is too strict for this account, use enriched artists directly.
+            candidates = dict(all_enriched)
 
         # Step 4 – filter and rank with a relaxed fallback threshold.
         filtered = [

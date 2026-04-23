@@ -1,4 +1,6 @@
-﻿from nicegui import ui
+﻿import json
+
+from nicegui import ui
 
 from .listening_controller import ListeningController
 from ...user_service.models import User
@@ -25,8 +27,8 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
             """Inject the Spotify Web Playback SDK and initialise the in-browser player."""
             js = f"""
 (function() {{
-  if (window._spotifyPlayerReady) return;
   window._spotifyAccessToken = {repr(access_token)};
+    if (window._spotifyPlayerReady) return;
 
   window.onSpotifyWebPlaybackSDKReady = function() {{
     var player = new Spotify.Player({{
@@ -35,19 +37,25 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
       volume: 0.5
     }});
 
-    window._spotifyPlayTrack = function(uri) {{
-      if (!window._spotifyDeviceId) {{ console.warn('Device not ready'); return; }}
-      fetch('https://api.spotify.com/v1/me/player/play?device_id=' + window._spotifyDeviceId, {{
+        window._spotifyPlayTrack = async function(uri) {{
+            var el = document.getElementById('spotify-now-playing');
+            if (!window._spotifyDeviceId) {{
+                window._spotifyPendingTrackUri = uri;
+                if (el) el.textContent = 'Waiting for web player device...';
+                return;
+            }}
+            if (el) el.textContent = 'Loading...';
+            var response = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + window._spotifyDeviceId, {{
         method: 'PUT',
         headers: {{
           'Authorization': 'Bearer ' + window._spotifyAccessToken,
           'Content-Type': 'application/json'
         }},
         body: JSON.stringify({{ uris: [uri] }})
-      }}).then(function() {{
-        var el = document.getElementById('spotify-now-playing');
-        if (el) el.textContent = 'Loading...';
-      }});
+            }});
+            if (!response.ok && el) {{
+                el.textContent = 'Play failed (' + response.status + '). Open Spotify once and retry.';
+            }}
     }};
 
     player.addListener('ready', function(data) {{
@@ -59,8 +67,14 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
           'Authorization': 'Bearer ' + window._spotifyAccessToken,
           'Content-Type': 'application/json'
         }},
-        body: JSON.stringify({{ device_ids: [data.device_id], play: false }})
-      }});
+                body: JSON.stringify({{ device_ids: [data.device_id], play: false }})
+            }}).finally(function() {{
+                if (window._spotifyPendingTrackUri) {{
+                    var pending = window._spotifyPendingTrackUri;
+                    window._spotifyPendingTrackUri = null;
+                    window._spotifyPlayTrack(pending);
+                }}
+            }});
     }});
 
     player.addListener('not_ready', function(data) {{
@@ -123,13 +137,8 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             ui.notify("Connect Spotify first.", type="warning")
                             return
                         _inject_web_player(token)
-                        ui.run_javascript(
-                            f"if(window._spotifyDeviceId){{"
-                            f"  window._spotifyPlayTrack('{uri}');"
-                            f"}} else {{"
-                            f"  setTimeout(function(){{window._spotifyPlayTrack('{uri}');}}, 2000);"
-                            f"}}"
-                        )
+                        safe_uri = json.dumps(uri)
+                        ui.run_javascript(f"window._spotifyPlayTrack({safe_uri});")
 
                     with ui.row().classes(
                         "w-full items-center gap-4 px-3 py-2 rounded cursor-pointer "
