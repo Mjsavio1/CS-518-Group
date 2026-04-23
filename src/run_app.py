@@ -28,34 +28,6 @@ logic = AppLogic(service)
 # Seed Admin
 logic.seed_admin()
 
-# Enforce a dark visual system with green accents across the app.
-ui.colors(
-        primary="#22c55e",
-        secondary="#16a34a",
-        accent="#15803d",
-        positive="#22c55e",
-        negative="#ef4444",
-        warning="#f59e0b",
-        info="#4ade80",
-)
-ui.add_head_html(
-        """
-        <style>
-            :root {
-                color-scheme: dark;
-            }
-
-            body,
-            .q-layout,
-            .q-page-container,
-            .q-page {
-                background: #000000 !important;
-                color: #dcfce7 !important;
-            }
-        </style>
-        """
-)
-
 # Init UI
 init_pages(logic)
 

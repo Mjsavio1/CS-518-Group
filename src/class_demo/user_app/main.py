@@ -12,6 +12,36 @@ from .session import SessionManager
 from .users.user_gui import render_user_module
 
 
+def _apply_theme() -> None:
+    ui.colors(
+        primary="#22c55e",
+        secondary="#16a34a",
+        accent="#15803d",
+        positive="#22c55e",
+        negative="#ef4444",
+        warning="#f59e0b",
+        info="#4ade80",
+    )
+    ui.dark_mode().enable()
+    ui.add_head_html(
+        """
+        <style>
+            :root {
+                color-scheme: dark;
+            }
+
+            body,
+            .q-layout,
+            .q-page-container,
+            .q-page {
+                background: #000000 !important;
+                color: #dcfce7 !important;
+            }
+        </style>
+        """
+    )
+
+
 def init_pages(
     user_logic: AppLogic,
     listening_controller: ListeningController | None = None,
@@ -20,6 +50,7 @@ def init_pages(
 
     @ui.page("/login")
     def login_page():
+        _apply_theme()
         with ui.card().classes("absolute-center w-80"):
             ui.label("User Authentication").classes("text-h6")
             user_input = ui.input("Username/Email")
@@ -40,6 +71,7 @@ def init_pages(
 
     @ui.page("/signup")
     def signup_page():
+        _apply_theme()
         with ui.card().classes("absolute-center w-96"):
             ui.label("Create Account").classes("text-h6")
             email_input = ui.input("Email")
@@ -75,6 +107,7 @@ def init_pages(
 
     @ui.page("/")
     def dashboard():
+        _apply_theme()
         if not SessionManager.is_authenticated():
             return ui.navigate.to("/login")
 
@@ -86,6 +119,7 @@ def init_pages(
 
     @ui.page("/callback")
     def spotify_callback_page(code: str | None = None, state: str | None = None, error: str | None = None):
+        _apply_theme()
         if not SessionManager.is_authenticated():
             ui.notify("Please log in before connecting Spotify.", type="negative")
             return ui.navigate.to("/login")
