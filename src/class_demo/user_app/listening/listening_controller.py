@@ -14,3 +14,6 @@ class ListeningController:
 
     def get_top_tracks(self) -> List[Dict[str, str]]:
         return self.service.get_sample_top_tracks()
+
+    def get_recent_plays(self) -> List[Dict[str, str]]:
+        return self.service.get_sample_recent_plays()
