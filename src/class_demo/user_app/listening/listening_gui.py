@@ -33,7 +33,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 return
 
             try:
-                tracks = controller.get_top_tracks(current_user, refresh_callback=lambda u: user_logic.get_decrypted_refresh_token(u, u.id))
+                tracks = controller.get_top_tracks(current_user, refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id))
             except Exception as exc:
                 tracks_container.clear()
                 status_label.set_text(str(exc))
