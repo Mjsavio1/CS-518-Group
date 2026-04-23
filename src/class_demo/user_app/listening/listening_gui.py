@@ -10,28 +10,41 @@ def render_listening_module(controller: ListeningController) -> None:
         ui.label("Discover insights from your Spotify listening activity.").classes("text-subtitle1 text-grey")
 
         status_label = ui.label("").classes("text-body1 text-primary")
-        tracks_table: ui.table | None = None
+        tracks_container = ui.column().classes("w-full")
 
-        columns = [
+        columns_top = [
             {"name": "title", "label": "Track", "field": "title", "align": "left"},
             {"name": "artist", "label": "Artist", "field": "artist", "align": "left"},
             {"name": "plays", "label": "Plays", "field": "plays", "align": "right"},
         ]
-        tracks_container = ui.column().classes("w-full")
+        columns_recent = [
+            {"name": "title", "label": "Track", "field": "title", "align": "left"},
+            {"name": "artist", "label": "Artist", "field": "artist", "align": "left"},
+            {"name": "played_at", "label": "Played At", "field": "played_at", "align": "left"},
+        ]
 
         def on_connect():
             status_label.set_text(controller.get_greeting())
             tracks_container.clear()
-            try:
-                tracks = controller.get_top_tracks()
-                with tracks_container:
+            with tracks_container:
+                try:
+                    tracks = controller.get_top_tracks()
+                    ui.label("Your Top Tracks").classes("text-h6 mt-2")
                     if not tracks:
                         ui.label("No listening history found. Start playing some music on Spotify!").classes("text-grey")
                     else:
-                        ui.label("Your Top Tracks").classes("text-h6 mt-2")
-                        ui.table(columns=columns, rows=tracks).classes("w-full")
-            except Exception as e:
-                with tracks_container:
-                    ui.label(f"Failed to load tracks. Please try again.").classes("text-negative")
+                        ui.table(columns=columns_top, rows=tracks).classes("w-full")
+                except Exception:
+                    ui.label("Failed to load top tracks. Please try again.").classes("text-negative")
+
+                try:
+                    recent = controller.get_recent_plays()
+                    ui.label("Recent Plays").classes("text-h6 mt-4")
+                    if not recent:
+                        ui.label("No recent plays found.").classes("text-grey")
+                    else:
+                        ui.table(columns=columns_recent, rows=recent).classes("w-full")
+                except Exception:
+                    ui.label("Failed to load recent plays. Please try again.").classes("text-negative")
 
         ui.button("Connect to Spotify", on_click=on_connect).props("icon=music_note color=green")
