@@ -132,17 +132,33 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     track_uri = track.get("uri", "")
 
                     def _play(_, uri=track_uri) -> None:
-                        token = controller.get_access_token_resilient(
-                            current_user,
-                            refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                            force_refresh=True,
-                        )
-                        if not token:
-                            ui.notify("Connect Spotify first.", type="warning")
-                            return
-                        _inject_web_player(token)
-                        safe_uri = json.dumps(uri)
-                        ui.run_javascript(f"window._spotifyPlayTrack({safe_uri});")
+                        try:
+                            token = controller.get_access_token_resilient(
+                                current_user,
+                                refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                                force_refresh=False,
+                            )
+                            if not token:
+                                ui.notify("Connect Spotify first.", type="warning")
+                                ui.run_javascript(
+                                    "var el=document.getElementById('spotify-now-playing');"
+                                    "if(el){el.textContent='Connect Spotify first.';}"
+                                )
+                                return
+                            _inject_web_player(token)
+                            safe_uri = json.dumps(uri)
+                            ui.run_javascript(
+                                "var el=document.getElementById('spotify-now-playing');"
+                                "if(el){el.textContent='Attempting playback...';}"
+                            )
+                            ui.run_javascript(f"window._spotifyPlayTrack({safe_uri});")
+                        except Exception as exc:
+                            ui.notify(str(exc), type="negative")
+                            safe_msg = json.dumps(str(exc))
+                            ui.run_javascript(
+                                "var el=document.getElementById('spotify-now-playing');"
+                                f"if(el){{el.textContent='Playback error: ' + {safe_msg};}}"
+                            )
 
                     with ui.row().classes(
                         "w-full items-center gap-4 px-3 py-2 rounded cursor-pointer "
@@ -231,15 +247,22 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
             ui.label("No track playing").classes("text-body1 text-grey").props("id=spotify-now-playing")
         with ui.row().classes("items-center gap-3"):
             def launch_web_player() -> None:
-                token = controller.get_access_token_resilient(
-                    current_user,
-                    refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                    force_refresh=True,
-                )
-                if not token:
-                    ui.notify("Connect Spotify first.", type="warning")
-                    return
-                _inject_web_player(token)
+                try:
+                    token = controller.get_access_token_resilient(
+                        current_user,
+                        refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                        force_refresh=False,
+                    )
+                    if not token:
+                        ui.notify("Connect Spotify first.", type="warning")
+                        return
+                    _inject_web_player(token)
+                    ui.run_javascript(
+                        "var el=document.getElementById('spotify-now-playing');"
+                        "if(el){el.textContent='Web player launched. Click a track to play.';}"
+                    )
+                except Exception as exc:
+                    ui.notify(str(exc), type="negative")
 
             ui.button("Launch Web Player", on_click=launch_web_player).props("icon=speaker color=green")
         # ----------------------------------------

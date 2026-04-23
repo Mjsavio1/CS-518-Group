@@ -90,15 +90,23 @@ class ListeningController:
         if not user or not getattr(user, "id", None):
             return None
 
-        token = None if force_refresh else self.service.get_access_token(user.id)
+        token = self.service.get_access_token(user.id)
+        if force_refresh:
+            token = None
         if token:
             return token
 
         if refresh_callback and getattr(user, "spotify_refresh_token", None):
-            rt = refresh_callback(user)
-            if rt:
-                self.service.refresh_session_with_refresh_token(user.id, rt)
-                return self.service.get_access_token(user.id)
+            try:
+                rt = refresh_callback(user)
+                if rt:
+                    self.service.refresh_session_with_refresh_token(user.id, rt)
+                    refreshed = self.service.get_access_token(user.id)
+                    if refreshed:
+                        return refreshed
+            except Exception:
+                # Fall back to any currently-valid token instead of failing hard.
+                pass
 
         return self.service.get_access_token(user.id)
 

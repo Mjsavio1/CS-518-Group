@@ -427,6 +427,18 @@ class ListeningService:
             # Last-resort fallback so the section is still useful on sparse/new accounts.
             filtered = list(top_artist_fallback.values())
 
+        if not filtered and track_artist_map:
+            # Absolute fallback: return unique artists seen in top tracks.
+            filtered = [
+                {
+                    "name": name,
+                    "popularity": None,
+                    "genres": "Unknown",
+                }
+                for name in track_artist_map.values()
+                if name
+            ]
+
         filtered.sort(key=lambda x: (x["popularity"] is None, x["popularity"] or 0))
         return filtered[:max_results]
 
