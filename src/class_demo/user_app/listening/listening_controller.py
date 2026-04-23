@@ -1,4 +1,5 @@
 from typing import List, Dict
+import requests
 
 from ...listening_service.listening_service import ListeningService
 
@@ -20,6 +21,7 @@ class ListeningController:
         url = "https://api.spotify.com/v1/me/player/pause"
         headers = {"Authorization": f"Bearer {self.access_token}"}
         requests.put(url, headers=headers)
+
     def skip_back(self):
         """Skip to the previous track."""
         url = "https://api.spotify.com/v1/me/player/next"
@@ -32,4 +34,12 @@ class ListeningController:
         headers = {"Authorization": f"Bearer {self.access_token}"}
         requests.post(url, headers=headers)
 
-        # TODO: Integrate with Spotify API or playback backend        # TODO: Integrate with Spotify API or playback backend
+    def set_volume(self, volume_percent: int):
+        """Set Spotify playback volume (0-100)."""
+        url = f"https://api.spotify.com/v1/me/player/volume?volume_percent={volume_percent}"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        response = requests.put(url, headers=headers)
+        if response.status_code != 204:
+            print(f"Failed to set volume: {response.status_code} {response.text}")
+
+        # TODO: Integrate with Spotify API or playback backend

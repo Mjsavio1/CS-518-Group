@@ -50,16 +50,23 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     ui.button(icon='skip_next', on_click=lambda: controller.skip_forward()).props('color=primary')
                 # -----------------------
 
-                # --- Volume Slider with Local Storage ---
-                ui.slider(min=0, max=100, value=50, step=1, on_change=lambda e: ui.run_javascript(
-                    f"localStorage.setItem('playerVolume', {e.value});"
-                )).bind_value('playerVolume').props('label=Volume')
+                # --- Volume Slider with Local Storage and Spotify API ---
+                def on_volume_change(e):
+                    volume = int(e.value)
+                    ui.run_javascript(f"localStorage.setItem('playerVolume', {volume});")
+                    controller.set_volume(volume)
+
+                slider = ui.slider(
+                    min=0, max=100, value=50, step=1, on_change=on_volume_change
+                ).props('label=Volume')
+
+                # Restore slider value from local storage on page load
                 ui.run_javascript("""
                     const savedVolume = localStorage.getItem('playerVolume');
                     if (savedVolume !== null) {
                         document.querySelector('input[type=range]').value = savedVolume;
                     }
                 """)
-                # ----------------------------------------
+                # ------------------------------------------------------
 
         ui.button("Connect to Spotify", on_click=on_connect).props("icon=music_note color=green")
