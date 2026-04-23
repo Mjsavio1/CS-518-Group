@@ -30,6 +30,14 @@ class ListeningService:
     _TOP_ARTISTS_URL = "https://api.spotify.com/v1/me/top/artists"
     _RECOMMENDATIONS_URL = "https://api.spotify.com/v1/recommendations"
     _ARTISTS_URL = "https://api.spotify.com/v1/artists"
+    _DEFAULT_SCOPE = " ".join(
+        [
+            "user-top-read",
+            "streaming",
+            "user-read-playback-state",
+            "user-modify-playback-state",
+        ]
+    )
 
     def __init__(
         self,
@@ -43,7 +51,7 @@ class ListeningService:
     ):
         self.client_id = client_id or os.getenv("SPOTIFY_CLIENT_ID", "")
         self.redirect_uri = redirect_uri or os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback")
-        self.scope = scope or os.getenv("SPOTIFY_SCOPE", "user-top-read")
+        self.scope = scope or os.getenv("SPOTIFY_SCOPE", self._DEFAULT_SCOPE)
         self.timeout_seconds = timeout_seconds
 
         self._post_request = post_request or requests.post

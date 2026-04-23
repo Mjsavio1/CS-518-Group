@@ -243,8 +243,9 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 ui.notify("Cannot load recommendations: user session missing.", type="negative")
                 return
             try:
-                recs = controller.get_artist_recommendations(
-                    user_id=current_user.id,
+                recs = controller.get_artist_recommendations_resilient(
+                    user=current_user,
+                    refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
                     max_results=10,
                     popularity_max=60,
                 )

@@ -81,6 +81,10 @@ class ListeningController:
     def is_connected(self, user_id: str) -> bool:
         return self.service.is_connected(user_id)
 
+    def get_access_token(self, user_id: str) -> str | None:
+        """Return the Spotify access token for the user if connected."""
+        return self.service.get_access_token(user_id)
+
     def disconnect(self, user_id: str) -> None:
         self.service.disconnect(user_id)
 
@@ -96,6 +100,32 @@ class ListeningController:
             max_results=max_results,
             popularity_max=popularity_max,
         )
+
+    def get_artist_recommendations_resilient(
+        self,
+        user,
+        refresh_callback=None,
+        max_results: int = 10,
+        popularity_max: int = 60,
+    ) -> List[Dict]:
+        """Fetch recommendations and retry once after token refresh when possible."""
+        try:
+            return self.service.get_artist_recommendations(
+                user_id=user.id,
+                max_results=max_results,
+                popularity_max=popularity_max,
+            )
+        except Exception:
+            if refresh_callback and user and getattr(user, "spotify_refresh_token", None):
+                rt = refresh_callback(user)
+                if rt:
+                    self.service.refresh_session_with_refresh_token(user.id, rt)
+                    return self.service.get_artist_recommendations(
+                        user_id=user.id,
+                        max_results=max_results,
+                        popularity_max=popularity_max,
+                    )
+            raise
 
     def get_top_tracks(self, user, refresh_callback=None) -> List[Dict[str, str]]:
         """Attempt to return top tracks. If session missing and a refresh_callback
