@@ -136,7 +136,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             token = controller.get_access_token_resilient(
                                 current_user,
                                 refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                                force_refresh=False,
+                                force_refresh=True,
                             )
                             if not token:
                                 ui.notify("Connect Spotify first.", type="warning")
@@ -251,7 +251,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     token = controller.get_access_token_resilient(
                         current_user,
                         refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                        force_refresh=False,
+                        force_refresh=True,
                     )
                     if not token:
                         ui.notify("Connect Spotify first.", type="warning")
