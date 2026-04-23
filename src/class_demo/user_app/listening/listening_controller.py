@@ -152,6 +152,20 @@ class ListeningController:
                     )
             raise
 
+    def play_track_resilient(self, user, track_uri: str, device_id: str, refresh_callback=None) -> None:
+        """Play a track on a device and retry once after refresh when needed."""
+        try:
+            self.service.play_track(user_id=user.id, track_uri=track_uri, device_id=device_id)
+            return
+        except Exception:
+            if refresh_callback and user and getattr(user, "spotify_refresh_token", None):
+                rt = refresh_callback(user)
+                if rt:
+                    self.service.refresh_session_with_refresh_token(user.id, rt)
+                    self.service.play_track(user_id=user.id, track_uri=track_uri, device_id=device_id)
+                    return
+            raise
+
     def get_top_tracks(self, user, refresh_callback=None) -> List[Dict[str, str]]:
         """Attempt to return top tracks. If session missing and a refresh_callback
         is provided (callable that takes a user and returns a refresh token string),

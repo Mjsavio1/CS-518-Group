@@ -131,7 +131,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 for track in tracks:
                     track_uri = track.get("uri", "")
 
-                    def _play(_, uri=track_uri) -> None:
+                    async def _play(_, uri=track_uri) -> None:
                         try:
                             token = controller.get_access_token_resilient(
                                 current_user,
@@ -146,16 +146,39 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                                 )
                                 return
                             _inject_web_player(token)
-                            safe_uri = json.dumps(uri)
-                            ui.run_javascript(
+                            await ui.run_javascript(
                                 "var el=document.getElementById('spotify-now-playing');"
                                 "if(el){el.textContent='Attempting playback...';}"
                             )
-                            ui.run_javascript(f"window._spotifyPlayTrack({safe_uri});")
+                            device_id = await ui.run_javascript("return window._spotifyDeviceId || null;")
+                            if not device_id:
+                                # Give the SDK a moment to report ready and populate device ID.
+                                device_id = await ui.run_javascript(
+                                    "return new Promise(function(resolve){"
+                                    "setTimeout(function(){resolve(window._spotifyDeviceId || null);}, 1500);"
+                                    "});"
+                                )
+                            if not device_id:
+                                await ui.run_javascript(
+                                    "var el=document.getElementById('spotify-now-playing');"
+                                    "if(el){el.textContent='Web player device not ready yet. Click again.';}"
+                                )
+                                return
+
+                            controller.play_track_resilient(
+                                user=current_user,
+                                track_uri=uri,
+                                device_id=str(device_id),
+                                refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                            )
+                            await ui.run_javascript(
+                                "var el=document.getElementById('spotify-now-playing');"
+                                "if(el){el.textContent='Playback command sent.';}"
+                            )
                         except Exception as exc:
                             ui.notify(str(exc), type="negative")
                             safe_msg = json.dumps(str(exc))
-                            ui.run_javascript(
+                            await ui.run_javascript(
                                 "var el=document.getElementById('spotify-now-playing');"
                                 f"if(el){{el.textContent='Playback error: ' + {safe_msg};}}"
                             )

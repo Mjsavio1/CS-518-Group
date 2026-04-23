@@ -58,6 +58,7 @@ class ListeningService:
 
         self._post_request = post_request or requests.post
         self._get_request = get_request or requests.get
+        self._put_request = requests.put
 
         # Safety by design: tokens are never persisted to DB and are cleared on restart.
         self._pending_auth: Dict[str, Dict[str, object]] = {}
@@ -261,6 +262,31 @@ class ListeningService:
                     }
             )
         return tracks
+
+    def play_track(self, user_id: str, track_uri: str, device_id: str) -> None:
+        """Start playback of a specific track URI on a specific Spotify device."""
+        if not self.is_connected(user_id):
+            raise SpotifyConnectionError("Spotify is not connected. Complete secure connection first.")
+        if not track_uri:
+            raise SpotifyConnectionError("Track URI is missing.")
+        if not device_id:
+            raise SpotifyConnectionError("Spotify web player device is not ready yet.")
+
+        token = str(self._sessions[user_id]["access_token"])
+        response = self._put_request(
+            f"https://api.spotify.com/v1/me/player/play?device_id={device_id}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"uris": [track_uri]},
+            timeout=self.timeout_seconds,
+        )
+        if response.status_code not in (202, 204):
+            if response.status_code == 401:
+                self._sessions.pop(user_id, None)
+                raise SpotifyConnectionError("Spotify access expired while starting playback. Please reconnect.")
+            raise SpotifyConnectionError(f"Spotify playback failed ({response.status_code}).")
 
     def get_artist_recommendations(
         self,
