@@ -69,4 +69,22 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 """)
                 # ------------------------------------------------------
 
+                # --- Duration Countdown Display ---
+                duration_label = ui.label("Time left: --").classes("text-body2")
+
+                def update_duration():
+                    progress, duration = controller.get_playback_info()
+                    if progress is not None and duration is not None:
+                        time_left = duration - progress
+                        duration_label.set_text(f"Time left: {time_left} sec")
+                    else:
+                        duration_label.set_text("Time left: --")
+
+                def poll_duration():
+                    update_duration()
+                    ui.timer(1.0, poll_duration, once=True)
+
+                poll_duration()
+                # ----------------------------------
+
         ui.button("Connect to Spotify", on_click=on_connect).props("icon=music_note color=green")

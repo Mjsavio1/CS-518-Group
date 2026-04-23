@@ -42,4 +42,16 @@ class ListeningController:
         if response.status_code != 204:
             print(f"Failed to set volume: {response.status_code} {response.text}")
 
+    def get_playback_info(self):
+        """Get current playback position and duration from Spotify."""
+        url = "https://api.spotify.com/v1/me/player/currently-playing"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            progress_ms = data['progress_ms']
+            duration_ms = data['item']['duration_ms']
+            return progress_ms // 1000, duration_ms // 1000  # return in seconds
+        return None, None
+
         # TODO: Integrate with Spotify API or playback backend
