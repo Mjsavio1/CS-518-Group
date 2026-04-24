@@ -13,9 +13,6 @@ class ListeningController:
     def get_greeting(self) -> str:
         return self.service.hello_world()
 
-    def get_top_tracks(self) -> List[Dict[str, str]]:
-        return self.service.get_sample_top_tracks()
-
     def play_pause(self):
         """Toggle play/pause for the current track."""
         url = "https://api.spotify.com/v1/me/player/pause"
@@ -138,6 +135,10 @@ class ListeningController:
             max_results=max_results,
             popularity_max=popularity_max,
         )
+
+    def get_last_song_recommendation_debug(self, user_id: str) -> Dict[str, object]:
+        """Return diagnostics from the latest song recommendation request."""
+        return self.service.get_last_song_recommendation_debug(user_id)
 
     def get_song_recommendations_resilient(
         self,

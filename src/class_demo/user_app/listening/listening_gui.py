@@ -12,105 +12,210 @@ def _parse_lines(raw_text: str) -> list[str]:
     return [line.strip() for line in raw_text.splitlines() if line.strip()]
 
 
-def render_listening_module(controller: ListeningController, logic: AppLogic, current_user: User) -> None:
-    """Render the Listening History panel inside a tab panel."""
-    with ui.column().classes("w-full gap-4"):
-        ui.label("Listening History").classes("text-h5")
-        ui.label("Discover insights from your Spotify listening activity.").classes("text-subtitle1 text-grey")
+def _spotify_embed_url(track_uri: str) -> str:
+    """Build a Spotify embed URL from a Spotify track URI or URL."""
+    if not track_uri:
+        return ""
+    if track_uri.startswith("spotify:track:"):
+        track_id = track_uri.split(":")[-1].strip()
+        if track_id:
+            return f"https://open.spotify.com/embed/track/{track_id}?utm_source=generator"
+    marker = "track/"
+    if marker in track_uri:
+        tail = track_uri.split(marker, 1)[1]
+        track_id = tail.split("?", 1)[0].strip().strip("/")
+        if track_id:
+            return f"https://open.spotify.com/embed/track/{track_id}?utm_source=generator"
+    return ""
 
-        status_label = ui.label(controller.get_greeting()).classes("text-body1 text-primary")
-        ui.label(controller.get_safety_notes()).classes("text-caption text-secondary")
 
-        tracks_container = ui.column().classes("w-full")
-
-        def _inject_web_player(access_token: str) -> None:
-            """Inject the Spotify Web Playback SDK and initialise the in-browser player."""
-            js = f"""
+def _inject_web_player(access_token: str) -> None:
+        """Inject the Spotify Web Playback SDK and initialise the in-browser player."""
+        js = f"""
 (function() {{
-  window._spotifyAccessToken = {repr(access_token)};
+    window._spotifyAccessToken = {repr(access_token)};
+    window._spotifyPendingTrackUri = window._spotifyPendingTrackUri || null;
     if (window._spotifyPlayerReady) return;
 
-  window.onSpotifyWebPlaybackSDKReady = function() {{
-    var player = new Spotify.Player({{
-      name: 'Nichetify Web Player',
-      getOAuthToken: function(cb) {{ cb(window._spotifyAccessToken); }},
-      volume: 0.5
-    }});
+    window.onSpotifyWebPlaybackSDKReady = function() {{
+        var player = new Spotify.Player({{
+            name: 'Nichetify Web Player',
+            getOAuthToken: function(cb) {{ cb(window._spotifyAccessToken); }},
+            volume: 0.5
+        }});
+
+        window._spotifyTogglePlay = async function() {{
+            if (window._spotifyPlayer) await window._spotifyPlayer.togglePlay();
+        }};
+
+        window._spotifyNextTrack = async function() {{
+            if (window._spotifyPlayer) await window._spotifyPlayer.nextTrack();
+        }};
+
+        window._spotifyPreviousTrack = async function() {{
+            if (window._spotifyPlayer) await window._spotifyPlayer.previousTrack();
+        }};
+
+        window._spotifySetVolume = async function(volumePercent) {{
+            if (!window._spotifyPlayer) return;
+            var normalized = Math.max(0, Math.min(1, Number(volumePercent || 0) / 100));
+            await window._spotifyPlayer.setVolume(normalized);
+            localStorage.setItem('playerVolume', String(Math.round(normalized * 100)));
+        }};
 
         window._spotifyPlayTrack = async function(uri) {{
-            var el = document.getElementById('spotify-now-playing');
-            if (!window._spotifyDeviceId) {{
-                window._spotifyPendingTrackUri = uri;
-                if (el) el.textContent = 'Waiting for web player device...';
-                return;
+            window._spotifyPendingTrackUri = uri;
+            if (window._spotifyPlayer && window._spotifyPlayer.activateElement) {{
+                try {{
+                    await window._spotifyPlayer.activateElement();
+                }} catch (err) {{
+                    console.warn('Spotify activateElement failed', err);
+                }}
             }}
-            if (el) el.textContent = 'Loading...';
-            var response = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + window._spotifyDeviceId, {{
-        method: 'PUT',
-        headers: {{
-          'Authorization': 'Bearer ' + window._spotifyAccessToken,
-          'Content-Type': 'application/json'
-        }},
-        body: JSON.stringify({{ uris: [uri] }})
-            }});
-            if (!response.ok && el) {{
-                el.textContent = 'Play failed (' + response.status + '). Open Spotify once and retry.';
-            }}
-    }};
+            if (!window._spotifyDeviceId) return;
 
-    player.addListener('ready', function(data) {{
-      window._spotifyDeviceId = data.device_id;
-      console.log('Spotify Web Player ready. Device ID:', data.device_id);
-      fetch('https://api.spotify.com/v1/me/player', {{
-        method: 'PUT',
-        headers: {{
-          'Authorization': 'Bearer ' + window._spotifyAccessToken,
-          'Content-Type': 'application/json'
-        }},
+            var response = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + window._spotifyDeviceId, {{
+                method: 'PUT',
+                headers: {{
+                    'Authorization': 'Bearer ' + window._spotifyAccessToken,
+                    'Content-Type': 'application/json'
+                }},
+                body: JSON.stringify({{ uris: [uri] }})
+            }});
+            if (response.ok) {{
+                window._spotifyPendingTrackUri = null;
+            }} else {{
+                console.warn('Spotify play failed', response.status);
+            }}
+        }};
+
+        player.addListener('ready', function(data) {{
+            window._spotifyDeviceId = data.device_id;
+            var savedVolume = Number(localStorage.getItem('playerVolume') || '50');
+            player.setVolume(Math.max(0, Math.min(1, savedVolume / 100)));
+            fetch('https://api.spotify.com/v1/me/player', {{
+                method: 'PUT',
+                headers: {{
+                    'Authorization': 'Bearer ' + window._spotifyAccessToken,
+                    'Content-Type': 'application/json'
+                }},
                 body: JSON.stringify({{ device_ids: [data.device_id], play: false }})
             }}).finally(function() {{
                 if (window._spotifyPendingTrackUri) {{
                     var pending = window._spotifyPendingTrackUri;
-                    window._spotifyPendingTrackUri = null;
                     window._spotifyPlayTrack(pending);
                 }}
             }});
-    }});
+        }});
 
-    player.addListener('not_ready', function(data) {{
-      console.warn('Spotify Web Player device went offline:', data.device_id);
-    }});
+        player.addListener('player_state_changed', function(state) {{
+            if (!state) return;
+            var playBtn = document.getElementById('spotify-toggle-button');
+            if (playBtn) {{
+                var iconEl = playBtn.querySelector('.q-icon');
+                if (iconEl) {{
+                    iconEl.textContent = state.paused ? 'play_arrow' : 'pause';
+                }}
+            }}
+        }});
 
-    player.addListener('player_state_changed', function(state) {{
-      if (!state) return;
-      var track = state.track_window.current_track;
-      var el = document.getElementById('spotify-now-playing');
-      if (el && track) {{
-        el.textContent = track.name + ' - ' + track.artists.map(function(a){{return a.name;}}).join(', ');
-      }}
-    }});
+        player.connect();
+        window._spotifyPlayer = player;
+        window._spotifyPlayerReady = true;
+    }};
 
-    player.connect();
-    window._spotifyPlayer = player;
-    window._spotifyPlayerReady = true;
-  }};
-
-  if (typeof Spotify !== 'undefined') {{
-    window.onSpotifyWebPlaybackSDKReady();
-  }} else {{
-    var script = document.createElement('script');
-    script.src = 'https://sdk.scdn.co/spotify-player.js';
-    script.async = true;
-    document.head.appendChild(script);
-  }}
+    if (typeof Spotify !== 'undefined') {{
+        window.onSpotifyWebPlaybackSDKReady();
+    }} else {{
+        var script = document.createElement('script');
+        script.src = 'https://sdk.scdn.co/spotify-player.js';
+        script.async = true;
+        document.head.appendChild(script);
+    }}
 }})();
 """
-            ui.run_javascript(js)
+        ui.run_javascript(js)
+
+
+def render_spotify_player(controller: ListeningController, logic: AppLogic, current_user: User) -> None:
+        """Render the global Spotify player at the top of the dashboard."""
+
+        def launch_web_player() -> None:
+                try:
+                        token = controller.get_access_token_resilient(
+                                current_user,
+                                refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                                force_refresh=True,
+                        )
+                        if not token:
+                                return
+                        _inject_web_player(token)
+                except Exception:
+                        return
+
+        def connect_spotify() -> None:
+                if not current_user.id:
+                        ui.notify("Cannot connect Spotify: user ID is missing.", type="negative")
+                        return
+                try:
+                        auth_url = controller.start_secure_connection(current_user.id)
+                        ui.notify("Opening Spotify secure login.", type="positive")
+                        ui.navigate.to(auth_url)
+                except Exception as exc:
+                        ui.notify(str(exc), type="negative")
+
+        def disconnect_spotify() -> None:
+                if not current_user.id:
+                        ui.notify("Cannot disconnect Spotify: user ID is missing.", type="negative")
+                        return
+                controller.disconnect(current_user.id)
+                ui.notify("Spotify session removed.", type="positive")
+
+        async def toggle_playback() -> None:
+                await ui.run_javascript("window._spotifyTogglePlay && window._spotifyTogglePlay();")
+
+        async def previous_track() -> None:
+                await ui.run_javascript("window._spotifyPreviousTrack && window._spotifyPreviousTrack();")
+
+        async def next_track() -> None:
+                await ui.run_javascript("window._spotifyNextTrack && window._spotifyNextTrack();")
+
+        def on_volume_change(e) -> None:
+                ui.run_javascript(f"window._spotifySetVolume && window._spotifySetVolume({int(e.value)});")
+
+        with ui.card().classes("w-full gap-3"):
+                with ui.row().classes("w-full items-center justify-between gap-3"):
+                        ui.label("Player").classes("text-h6")
+                        with ui.row().classes("items-center gap-2"):
+                                ui.button("Connect Spotify", on_click=connect_spotify).props("icon=security color=green")
+                                ui.button("Disconnect", on_click=disconnect_spotify).props("icon=logout color=negative")
+
+                with ui.row().classes("w-full"):
+                        ui.element("iframe") \
+                                .props(
+                                        'id=spotify-embed-player src="https://open.spotify.com/embed/track/11dFghVXANMlKmJXsNCbNl?utm_source=generator" '
+                                        'width="100%" height="152" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"'
+                                ) \
+                                .style("border-radius:12px; width:100%;")
+
+                with ui.row().classes("items-center gap-3"):
+                        ui.button(icon="skip_previous", on_click=previous_track).props("color=primary round")
+                        ui.button(icon="play_arrow", on_click=toggle_playback).props("id=spotify-toggle-button color=primary round")
+                        ui.button(icon="skip_next", on_click=next_track).props("color=primary round")
+                        ui.slider(min=0, max=100, value=50, step=1, on_change=on_volume_change).props("label=Volume").classes("w-64")
+
+        ui.timer(0.1, launch_web_player, once=True)
+
+
+def render_listening_module(controller: ListeningController, logic: AppLogic, current_user: User) -> None:
+    """Render the Listening History panel inside a tab panel."""
+    with ui.column().classes("w-full gap-4"):
+        tracks_container = ui.column().classes("w-full")
 
         def refresh_tracks() -> None:
             if not current_user.id:
                 tracks_container.clear()
-                status_label.set_text("User session missing; re-login required.")
+                ui.notify("User session missing; re-login required.", type="negative")
                 return
 
             try:
@@ -120,7 +225,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 )
             except Exception as exc:
                 tracks_container.clear()
-                status_label.set_text(str(exc))
+                ui.notify(str(exc), type="negative")
                 return
 
             tracks_container.clear()
@@ -130,9 +235,17 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
 
                 for track in tracks:
                     track_uri = track.get("uri", "")
+                    embed_url = _spotify_embed_url(str(track_uri))
 
-                    async def _play(_, uri=track_uri) -> None:
+                    async def _play(_, uri=track_uri, embed=embed_url) -> None:
                         try:
+                            if embed:
+                                safe_embed = json.dumps(embed)
+                                await ui.run_javascript(
+                                    "var frame=document.getElementById('spotify-embed-player');"
+                                    "if(frame){frame.src=" + safe_embed + ";}"
+                                )
+
                             token = controller.get_access_token_resilient(
                                 current_user,
                                 refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
@@ -140,41 +253,15 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             )
                             if not token:
                                 ui.notify("Connect Spotify first.", type="warning")
-                                ui.run_javascript(
-                                    "var el=document.getElementById('spotify-now-playing');"
-                                    "if(el){el.textContent='Connect Spotify first.';}"
-                                )
                                 return
                             _inject_web_player(token)
+                            safe_uri = json.dumps(str(uri))
                             await ui.run_javascript(
-                                "var el=document.getElementById('spotify-now-playing');"
-                                "if(el){el.textContent='Attempting playback...';}"
-                            )
-                            device_id = await ui.run_javascript("return window._spotifyDeviceId || null;")
-                            if not device_id:
-                                await ui.run_javascript(
-                                    "var el=document.getElementById('spotify-now-playing');"
-                                    "if(el){el.textContent='Web player device not ready yet. Click again.';}"
-                                )
-                                return
-
-                            controller.play_track_resilient(
-                                user=current_user,
-                                track_uri=uri,
-                                device_id=str(device_id),
-                                refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                            )
-                            await ui.run_javascript(
-                                "var el=document.getElementById('spotify-now-playing');"
-                                "if(el){el.textContent='Playback command sent.';}"
+                                "window._spotifyPendingTrackUri = " + safe_uri + ";"
+                                "if(window._spotifyPlayTrack){window._spotifyPlayTrack(" + safe_uri + ");}"
                             )
                         except Exception as exc:
                             ui.notify(str(exc), type="negative")
-                            safe_msg = json.dumps(str(exc))
-                            await ui.run_javascript(
-                                "var el=document.getElementById('spotify-now-playing');"
-                                f"if(el){{el.textContent='Playback error: ' + {safe_msg};}}"
-                            )
 
                     with ui.row().classes(
                         "w-full items-center gap-4 px-3 py-2 rounded cursor-pointer "
@@ -186,55 +273,12 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             ui.label(track["artist"]).classes("text-caption text-grey")
                         ui.label(f"Popularity: {track['plays']}").classes("text-caption text-grey ml-auto")
 
-                # --- Media Player UI ---
-                with ui.row().classes("items-center gap-4 mt-4"):
-                    ui.button(icon="skip_previous", on_click=lambda: controller.skip_back()).props("color=primary")
-                    ui.button(icon="play_arrow", on_click=lambda: controller.play_pause()).props("color=primary")
-                    ui.button(icon="skip_next", on_click=lambda: controller.skip_forward()).props("color=primary")
-                # -----------------------
-
-                # --- Volume Slider with Local Storage and Spotify API ---
-                def on_volume_change(e):
-                    volume = int(e.value)
-                    ui.run_javascript(f"localStorage.setItem('playerVolume', {volume});")
-                    controller.set_volume(volume)
-
-                ui.slider(
-                    min=0, max=100, value=50, step=1, on_change=on_volume_change
-                ).props("label=Volume")
-
-                ui.run_javascript("""
-                    const savedVolume = localStorage.getItem('playerVolume');
-                    if (savedVolume !== null) {
-                        document.querySelector('input[type=range]').value = savedVolume;
-                    }
-                """)
-                # ------------------------------------------------------
-
-                # --- Duration Countdown Display ---
-                duration_label = ui.label("Time left: --").classes("text-body2")
-
-                def update_duration():
-                    progress, duration = controller.get_playback_info()
-                    if progress is not None and duration is not None:
-                        duration_label.set_text(f"Time left: {duration - progress} sec")
-                    else:
-                        duration_label.set_text("Time left: --")
-
-                def poll_duration():
-                    update_duration()
-                    ui.timer(1.0, poll_duration, once=True)
-
-                poll_duration()
-                # ----------------------------------
-
         def connect_spotify() -> None:
             if not current_user.id:
                 ui.notify("Cannot connect Spotify: user ID is missing.", type="negative")
                 return
             try:
                 auth_url = controller.start_secure_connection(current_user.id)
-                status_label.set_text("Redirecting to Spotify secure login; callback completes automatically after approval.")
                 ui.notify("Opening Spotify secure login.", type="positive")
                 ui.navigate.to(auth_url)
             except Exception as exc:
@@ -246,42 +290,10 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                 return
             controller.disconnect(current_user.id)
             tracks_container.clear()
-            status_label.set_text("Spotify disconnected.")
             ui.notify("Spotify session removed.", type="positive")
 
         with ui.row().classes("items-center gap-3"):
-            ui.button("Connect Spotify", on_click=connect_spotify).props("icon=security color=green")
-            ui.button("Disconnect", on_click=disconnect_spotify).props("icon=logout color=negative")
-
-        with ui.row().classes("items-center gap-3"):
             ui.button("Load Top Tracks", on_click=refresh_tracks).props("icon=queue_music color=secondary")
-
-        # --- Spotify Web Playback SDK player ---
-        ui.separator()
-        ui.label("Spotify Web Player").classes("text-h6")
-        with ui.row().classes("items-center gap-3"):
-            ui.label("No track playing").classes("text-body1 text-grey").props("id=spotify-now-playing")
-        with ui.row().classes("items-center gap-3"):
-            def launch_web_player() -> None:
-                try:
-                    token = controller.get_access_token_resilient(
-                        current_user,
-                        refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                        force_refresh=True,
-                    )
-                    if not token:
-                        ui.notify("Connect Spotify first.", type="warning")
-                        return
-                    _inject_web_player(token)
-                    ui.run_javascript(
-                        "var el=document.getElementById('spotify-now-playing');"
-                        "if(el){el.textContent='Web player launched. Click a track to play.';}"
-                    )
-                except Exception as exc:
-                    ui.notify(str(exc), type="negative")
-
-            ui.button("Launch Web Player", on_click=launch_web_player).props("icon=speaker color=green")
-        # ----------------------------------------
 
         ui.separator()
         ui.label("Discover Lesser-Known Songs").classes("text-h6")
@@ -290,12 +302,6 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
             "with lower popularity." 
         ).classes("text-caption text-grey")
 
-        rec_columns = [
-            {"name": "track",      "label": "Song",       "field": "track",      "align": "left"},
-            {"name": "artist",     "label": "Artist",     "field": "artist",     "align": "left"},
-            {"name": "popularity", "label": "Popularity", "field": "popularity", "align": "center"},
-            {"name": "genre",      "label": "Genre",      "field": "genre",      "align": "left"},
-        ]
         rec_container = ui.column().classes("w-full")
 
         def load_recommendations() -> None:
@@ -309,12 +315,59 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     max_results=10,
                     popularity_max=65,
                 )
+                debug_info = controller.get_last_song_recommendation_debug(current_user.id)
                 rec_container.clear()
                 with rec_container:
                     if recs:
-                        ui.table(columns=rec_columns, rows=recs).classes("w-full")
+                        for rec in recs:
+                            track_uri = rec.get("uri", "")
+                            embed_url = _spotify_embed_url(str(track_uri)) if track_uri else ""
+
+                            async def _play_rec(_, uri=track_uri, embed=embed_url) -> None:
+                                try:
+                                    if embed:
+                                        safe_embed = json.dumps(embed)
+                                        await ui.run_javascript(
+                                            "var frame=document.getElementById('spotify-embed-player');"
+                                            "if(frame){frame.src=" + safe_embed + ";}"
+                                        )
+                                    if not uri:
+                                        ui.notify("No playback URI for this track.", type="warning")
+                                        return
+                                    token = controller.get_access_token_resilient(
+                                        current_user,
+                                        refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                                        force_refresh=True,
+                                    )
+                                    if not token:
+                                        ui.notify("Connect Spotify first.", type="warning")
+                                        return
+                                    _inject_web_player(token)
+                                    safe_uri = json.dumps(str(uri))
+                                    await ui.run_javascript(
+                                        "window._spotifyPendingTrackUri = " + safe_uri + ";"
+                                        "if(window._spotifyPlayTrack){window._spotifyPlayTrack(" + safe_uri + ");}"
+                                    )
+                                except Exception as exc:
+                                    ui.notify(str(exc), type="negative")
+
+                            with ui.row().classes(
+                                "w-full items-center gap-4 px-3 py-2 rounded cursor-pointer "
+                                "hover:bg-purple-900 transition-colors"
+                            ).on("click", _play_rec):
+                                icon_name = "play_circle" if track_uri else "music_note"
+                                ui.icon(icon_name).classes("text-purple-400 text-2xl")
+                                with ui.column().classes("gap-0"):
+                                    ui.label(str(rec.get("track", "Unknown"))).classes("text-body1 font-bold")
+                                    ui.label(str(rec.get("artist", "Unknown"))).classes("text-caption text-grey")
+                                with ui.column().classes("gap-0 ml-auto items-end"):
+                                    ui.label(f"Popularity: {rec.get('popularity', '?')}").classes("text-caption text-grey")
+                                    ui.label(str(rec.get("genre", ""))).classes("text-caption text-purple-300")
                     else:
                         ui.label("No lesser-known song recommendations found. Try reconnecting Spotify and loading top tracks first.").classes("text-grey")
+                        if debug_info:
+                            with ui.expansion("Recommendation debug details", icon="bug_report").classes("w-full mt-2"):
+                                ui.code(json.dumps(debug_info, indent=2), language="json").classes("w-full")
             except Exception as exc:
                 ui.notify(str(exc), type="negative")
 
