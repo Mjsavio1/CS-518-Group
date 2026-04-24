@@ -341,12 +341,12 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
 
                             async def _play_rec(_, tn=track_name, an=artist_name) -> None:
                                 try:
-                                    # Search Spotify for this iTunes-discovered song
                                     uri = await asyncio.to_thread(
                                         controller.search_track_uri,
                                         current_user,
                                         tn,
                                         an,
+                                        lambda u: logic.get_decrypted_refresh_token(u, u.id),
                                     )
                                     if not uri:
                                         if not controller.service.is_connected(current_user.id):
@@ -354,14 +354,12 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                                         else:
                                             ui.notify(f"'{tn}' by {an} couldn't be found on Spotify.", type="warning")
                                         return
-                                    # Load the track into the visible embed player at the top
-                                    embed_url = _spotify_embed_url(uri)
+                                    embed_url = _spotify_embed_url(str(uri))
                                     if embed_url:
                                         safe_embed = json.dumps(embed_url)
                                         await ui.run_javascript(
                                             "var frame=document.getElementById('spotify-embed-player');"
                                             "if(frame){frame.src=" + safe_embed + ";}"
-                                            # Scroll to top so the player is visible
                                             "window.scrollTo({top:0,behavior:'smooth'});"
                                         )
                                     else:
@@ -385,6 +383,31 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                         if debug_info:
                             with ui.expansion("Recommendation debug details", icon="bug_report").classes("w-full mt-2"):
                                 ui.code(json.dumps(debug_info, indent=2), language="json").classes("w-full")
+
+                if recs:
+                    # Warm the search cache in the background so clicks are instant.
+                    # Starts after a 4-second pause to let the rate limit from the
+                    # recommendations load recover, then searches one song every 2 seconds.
+                    async def _prefetch(tracks=recs):
+                        await asyncio.sleep(4)
+                        for rec in tracks:
+                            tn = str(rec.get("track", ""))
+                            an = str(rec.get("artist", ""))
+                            if not tn:
+                                continue
+                            try:
+                                await asyncio.to_thread(
+                                    controller.search_track_uri,
+                                    current_user,
+                                    tn,
+                                    an,
+                                    lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                                )
+                            except Exception:
+                                pass
+                            await asyncio.sleep(2)
+                    asyncio.create_task(_prefetch())
+
             except Exception as exc:
                 rec_container.clear()
                 ui.notify(str(exc), type="negative")

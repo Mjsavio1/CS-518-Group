@@ -67,6 +67,8 @@ class ListeningService:
         self._pending_auth: Dict[str, Dict[str, object]] = {}
         self._sessions: Dict[str, Dict[str, object]] = {}
         self._last_song_recommendation_debug: Dict[str, Dict[str, object]] = {}
+        self._last_search_debug: Dict[str, Dict[str, object]] = {}
+        self._search_cache: Dict[str, str] = {}  # "track|artist" -> spotify URI
         # allow injecting client_secret for testing or explicit config
         self.client_secret = client_secret or os.getenv("SPOTIFY_CLIENT_SECRET", "")
 
@@ -626,8 +628,13 @@ class ListeningService:
         """Search Spotify for a track by name + artist and return its URI, or None.
 
         Tries progressively looser queries to handle special characters in iTunes titles.
+        Results are cached in-process to avoid redundant API calls and rate limiting.
         """
         import re as _re
+
+        cache_key = f"{track_name.lower()}|{artist_name.lower()}"
+        if cache_key in self._search_cache:
+            return self._search_cache[cache_key] or None
 
         if not self.is_connected(user_id):
             return None
@@ -636,11 +643,20 @@ class ListeningService:
 
         def _norm(s: str) -> str:
             """Normalize Unicode apostrophes/quotes to ASCII."""
-            return s.replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'")
+            return (
+                s.replace("\u2019", "'")
+                .replace("\u2018", "'")
+                .replace("\u02bc", "'")
+                .replace("\u02bb", "'")  # Hawaiian \u02bbokina
+            )
 
         def _bare(s: str) -> str:
             """Remove all apostrophes and strip extra whitespace."""
-            return _re.sub(r"['\u2018\u2019\u02bc]", "", s).strip()
+            return _re.sub(r"['\u2018\u2019\u02bc\u02bb]", "", s).strip()
+
+        def _ascii_only(s: str) -> str:
+            """Strip all non-ASCII characters."""
+            return s.encode("ascii", "ignore").decode("ascii").strip()
 
         track = _norm(track_name)
         artist = _norm(artist_name)
@@ -649,6 +665,8 @@ class ListeningService:
         clean_artist = artist.split("(")[0].split("[")[0].strip()
         bare_track = _bare(clean_track)
         bare_artist = _bare(clean_artist)
+        ascii_track = _ascii_only(clean_track)
+        ascii_artist = _ascii_only(clean_artist)
 
         # Build queries from most specific to loosest; avoid quoted syntax (breaks on apostrophes)
         raw_queries = [
@@ -656,6 +674,8 @@ class ListeningService:
             f"{bare_track} {bare_artist}",
             clean_track,
             bare_track,
+            f"{ascii_track} {ascii_artist}",
+            ascii_track,
             f"{track} {artist}",
             track_name,
         ]
@@ -668,25 +688,59 @@ class ListeningService:
                 seen_q.add(q)
                 queries.append(q)
 
+        last_status: int = 0
+        last_body: str = ""
         for q in queries:
             try:
                 r = self._get_request(
                     self._SEARCH_URL,
                     headers=headers,
-                    params={"q": q, "type": "track", "limit": "3"},
+                    params={"q": q, "type": "track", "limit": "5"},
                     timeout=self.timeout_seconds,
                 )
+                last_status = r.status_code
                 if r.status_code == 200:
                     items = (r.json().get("tracks") or {}).get("items", [])
                     for item in items:
                         uri = item.get("uri") or ""
                         if uri:
+                            self._search_cache[cache_key] = str(uri)
                             return str(uri)
                 elif r.status_code == 401:
                     self._sessions.pop(user_id, None)
                     return None
-            except Exception:
+                elif r.status_code == 429:
+                    last_body = r.text[:200]
+                    import time as _time
+                    wait = min(int(r.headers.get("Retry-After", "5")), 15)
+                    _time.sleep(wait)
+                    # Retry this one query after the wait, then stop regardless
+                    try:
+                        r2 = self._get_request(
+                            self._SEARCH_URL,
+                            headers=headers,
+                            params={"q": q, "type": "track", "limit": "5"},
+                            timeout=self.timeout_seconds,
+                        )
+                        last_status = r2.status_code
+                        if r2.status_code == 200:
+                            for item in (r2.json().get("tracks") or {}).get("items", []):
+                                uri = item.get("uri") or ""
+                                if uri:
+                                    self._search_cache[cache_key] = str(uri)
+                                    return str(uri)
+                    except Exception:
+                        pass
+                    break  # stop after one retry
+                else:
+                    last_body = r.text[:200]
+            except Exception as exc:
+                last_body = str(exc)[:200]
                 continue
+        self._last_search_debug[user_id] = {"status": last_status, "body": last_body, "queries": queries}
+        # Cache negative result with empty string so we don't retry on every click
+        if last_status not in (401, 429):
+            self._search_cache[cache_key] = ""
         return None
 
     def get_artist_recommendations(

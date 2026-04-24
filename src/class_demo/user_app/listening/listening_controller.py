@@ -136,15 +136,36 @@ class ListeningController:
             popularity_max=popularity_max,
         )
 
+    def get_last_search_debug(self, user_id: str) -> Dict[str, object]:
+        """Return diagnostics from the latest search_track_uri call."""
+        return self.service._last_search_debug.get(user_id, {})
+
     def get_last_song_recommendation_debug(self, user_id: str) -> Dict[str, object]:
         """Return diagnostics from the latest song recommendation request."""
         return self.service.get_last_song_recommendation_debug(user_id)
 
-    def search_track_uri(self, user, track_name: str, artist_name: str) -> str:
-        """Search Spotify for a track URI. Returns empty string if not found or not connected."""
+    def search_track_uri(
+        self,
+        user,
+        track_name: str,
+        artist_name: str,
+        refresh_callback=None,
+    ) -> str:
+        """Search Spotify for a track URI, retrying once after token refresh if needed."""
         if not user or not getattr(user, "id", None):
             return ""
-        return self.service.search_track_uri(user.id, track_name, artist_name) or ""
+        result = self.service.search_track_uri(user.id, track_name, artist_name) or ""
+        if result:
+            return result
+        if refresh_callback and getattr(user, "spotify_refresh_token", None):
+            try:
+                rt = refresh_callback(user)
+                if rt:
+                    self.service.refresh_session_with_refresh_token(user.id, rt)
+                    result = self.service.search_track_uri(user.id, track_name, artist_name) or ""
+            except Exception:
+                pass
+        return result
 
     def get_song_recommendations_resilient(
         self,

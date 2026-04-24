@@ -2,6 +2,10 @@ from nicegui import ui
 import os
 import asyncio
 import logging
+try:
+    from version import APP_VERSION
+except ImportError:
+    APP_VERSION = "dev"
 
 from ..listening_service.listening_service import ListeningService
 from ..user_service.models import User
@@ -173,6 +177,7 @@ def _render_dashboard(current_user: User, user_logic: AppLogic, listening_contro
             ui.tab("Users")
             ui.tab("Listening History")
         ui.space()
+        ui.badge(APP_VERSION).props("color=grey-7").classes("text-xs font-mono")
         ui.button("Logout", on_click=lambda: [SessionManager.logout(), ui.navigate.to("/login")])
 
     render_spotify_player(listening_controller, user_logic, current_user)
