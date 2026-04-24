@@ -302,19 +302,24 @@ class ListeningService:
         max_results: int = 10,
         popularity_max: int = 65,
     ) -> List[Dict[str, object]]:
-        """Recommend lesser-known songs the user has never heard.
+        """Recommend lesser-known songs the user has not heard before.
 
-        Stages (each falls through to the next if it yields nothing):
+        Stages (each falls through if it yields nothing):
         1. Collect top artists → heard_artist_ids, seed_genres.
         2. Collect top tracks → heard_track_ids.
-        3. (Primary) /v1/recommendations with genre seeds only — NO artist/track
-           seeds, because those bias toward music the user already knows.
-           Filters out tracks by artists already in heard_artist_ids.
-        4. (Fallback A) Related-artist discovery — pull artists related to each
-           of the user's top artists via Spotify's graph, then find their tracks.
-        5. (Fallback B) Genre search — keyword search for artists in seed genres,
-           then fetch their tracks.
-        Returns empty list if nothing new is found — never surfaces library songs.
+        3. Spotify Recommendations API — two sub-stages:
+           3a. Genre seeds (when available; Broadway performers often have none).
+           3b. Artist seeds in rotating batches of 3, up to 15 artists total.
+               Essential when top artists carry no genre tags. Uses Spotify
+               collaborative filtering. Both sub-stages filter results by
+               heard_artist_ids so only truly new artists appear.
+        4. Related-artist discovery via /v1/artists/{id}/related-artists.
+           If all first-degree related artists are already heard, pivots to
+           second-degree by seeding off the heard first-degree artists.
+        5. Keyword artist search — plain text query (q=show tunes&type=artist).
+           Replaces the broken genre:"X" filter which returns HTTP 400 on
+           Spotify's current search API for type=artist.
+        Returns [] if nothing new is found — never returns library songs.
         """
         debug: Dict[str, object] = {
             "user_id": user_id,
@@ -334,10 +339,12 @@ class ListeningService:
         token = str(self._sessions[user_id]["access_token"])
         headers = {"Authorization": f"Bearer {token}"}
 
-        from urllib.parse import urlencode as _urlencode
-
         # ------------------------------------------------------------------ #
         # Stage 1: top artists → heard_artist_ids + seed_genres              #
+        # Collect up to 50 ordered IDs for use as Recommendations API seeds. #
+        # Broadway/theater performers on Spotify often have no genre tags,   #
+        # so seed_genres may be empty — artist-seed batching (Stage 3b)      #
+        # handles that case.                                                  #
         # ------------------------------------------------------------------ #
         heard_artist_ids: set[str] = set()
         ordered_seed_artist_ids: List[str] = []
@@ -361,7 +368,7 @@ class ListeningService:
                     continue
                 if aid not in heard_artist_ids:
                     heard_artist_ids.add(aid)
-                    if len(ordered_seed_artist_ids) < 5:
+                    if len(ordered_seed_artist_ids) < 50:
                         ordered_seed_artist_ids.append(aid)
                 for g in (artist.get("genres") or []):
                     g = g.strip()
@@ -395,21 +402,49 @@ class ListeningService:
 
         debug["heard_track_count"] = len(heard_track_ids)
 
-        # Shared dedup set across all stages — pre-seeded with heard tracks
         seen_track_ids: set[str] = set(heard_track_ids)
         candidates: List[Dict[str, object]] = []
 
         # ------------------------------------------------------------------ #
-        # Stage 3 (primary): Spotify Recommendations API — genre seeds only  #
+        # Stage 3: Spotify Recommendations API                               #
         #                                                                     #
-        # WHY no artist/track seeds: seeding with the user's own top artists #
-        # tells Spotify "give me more like these artists" — which returns     #
-        # music the user already knows. Genre seeds alone find niche tracks   #
-        # in the same style but from unfamiliar artists.                      #
+        # Both sub-stages filter results by heard_artist_ids, keeping only   #
+        # tracks by artists the user has never listened to.                  #
         #                                                                     #
-        # Spotify's Recommendations API uses hyphenated genre names           #
-        # ("show-tunes") while artist genre tags use spaces ("show tunes").   #
+        # 3a: Genre seeds. Spotify's Recommendations API uses hyphenated     #
+        #     genre names ("show-tunes") while artist genre tags use spaces.  #
+        # 3b: Artist seeds in rotating batches of 3. Critical for users      #
+        #     whose top artists carry no genre tags (Broadway/theater         #
+        #     performers). Spotify's collaborative filtering surfaces music   #
+        #     from similar-but-unheard artists even without genre data.       #
         # ------------------------------------------------------------------ #
+        rec_api_calls: List[Dict[str, object]] = []
+
+        def _ingest_rec_tracks(r: object, genre_hint: str) -> None:
+            if not hasattr(r, "status_code") or r.status_code != 200:  # type: ignore[union-attr]
+                return
+            for track in r.json().get("tracks", []):  # type: ignore[union-attr]
+                tid = str(track.get("id") or "")
+                if not tid or tid in seen_track_ids:
+                    continue
+                primary = (track.get("artists") or [{}])[0]
+                if str(primary.get("id") or "") in heard_artist_ids:
+                    continue
+                pop_val = track.get("popularity")
+                try:
+                    pop_num: int = int(pop_val) if pop_val is not None else 0
+                except (TypeError, ValueError):
+                    pop_num = 0
+                seen_track_ids.add(tid)
+                candidates.append({
+                    "track": str(track.get("name") or "Unknown Track"),
+                    "artist": str(primary.get("name") or "Unknown Artist"),
+                    "popularity": pop_num,
+                    "genre": genre_hint,
+                    "uri": str(track.get("uri") or ""),
+                })
+
+        # 3a: Genre seeds (when available)
         norm_genres: List[str] = []
         seen_norm: set[str] = set()
         for g in seed_genres:
@@ -418,9 +453,8 @@ class ListeningService:
                 norm_genres.append(n)
                 seen_norm.add(n)
 
-        rec_api_status = None
         if norm_genres:
-            rec_resp = self._get_request(
+            r = self._get_request(
                 self._RECOMMENDATIONS_URL,
                 headers=headers,
                 params={
@@ -430,32 +464,30 @@ class ListeningService:
                 },
                 timeout=self.timeout_seconds,
             )
-            rec_api_status = rec_resp.status_code
-            if rec_resp.status_code == 200:
-                for track in rec_resp.json().get("tracks", []):
-                    tid = str(track.get("id") or "")
-                    if not tid or tid in seen_track_ids:
-                        continue
-                    primary_artist = (track.get("artists") or [{}])[0]
-                    artist_id = str(primary_artist.get("id") or "")
-                    # Skip tracks by artists the user already listens to
-                    if artist_id in heard_artist_ids:
-                        continue
-                    pop_val = track.get("popularity")
-                    try:
-                        pop_num: int = int(pop_val) if pop_val is not None else 0
-                    except (TypeError, ValueError):
-                        pop_num = 0
-                    seen_track_ids.add(tid)
-                    candidates.append({
-                        "track": str(track.get("name") or "Unknown Track"),
-                        "artist": str(primary_artist.get("name") or "Unknown Artist"),
-                        "popularity": pop_num,
-                        "genre": seed_genres[0] if seed_genres else "recommended",
-                        "uri": str(track.get("uri") or ""),
-                    })
+            rec_api_calls.append({"type": "genre_seeds", "status": r.status_code, "seeds": norm_genres[:5]})
+            _ingest_rec_tracks(r, norm_genres[0])
 
-        debug["recommendations_api_status"] = rec_api_status
+        # 3b: Artist seeds — rotating batches of 3 across the user's top 15 artists.
+        for i in range(0, min(len(ordered_seed_artist_ids), 15), 3):
+            if len(candidates) >= max_results * 2:
+                break
+            chunk = ordered_seed_artist_ids[i:i + 3]
+            if not chunk:
+                break
+            r = self._get_request(
+                self._RECOMMENDATIONS_URL,
+                headers=headers,
+                params={
+                    "seed_artists": ",".join(chunk),
+                    "max_popularity": str(min(popularity_max, 50)),
+                    "limit": "100",
+                },
+                timeout=self.timeout_seconds,
+            )
+            rec_api_calls.append({"type": "artist_seeds", "status": r.status_code, "seeds": chunk})
+            _ingest_rec_tracks(r, seed_genres[0] if seed_genres else "similar to your taste")
+
+        debug["rec_api_calls"] = rec_api_calls
         debug["candidates_after_api"] = len(candidates)
 
         if candidates:
@@ -467,27 +499,31 @@ class ListeningService:
             return result
 
         # ------------------------------------------------------------------ #
-        # Stage 4 (fallback A): Related-artist discovery                     #
-        #                                                                     #
-        # Spotify's /related-artists uses its own listen-graph — more        #
-        # reliable than genre-keyword search for finding artists in the same  #
-        # musical neighbourhood that the user hasn't heard yet.              #
+        # Stage 4: Related-artist discovery                                  #
+        # Tries up to 10 of the user's top artists. If all first-degree      #
+        # related artists are already in heard_artist_ids (common for        #
+        # power users who have heard the whole genre community), pivots to   #
+        # second-degree by seeding off those heard first-degree artists.     #
         # ------------------------------------------------------------------ #
         related: List[Dict[str, object]] = []
         seen_related: set[str] = set(heard_artist_ids)
+        all_first_degree_ids: List[str] = []
 
-        for seed_aid in ordered_seed_artist_ids[:5]:
-            resp = self._get_request(
+        for seed_aid in ordered_seed_artist_ids[:10]:
+            r = self._get_request(
                 self._RELATED_ARTISTS_URL.format(seed_aid),
                 headers=headers,
                 timeout=self.timeout_seconds,
             )
-            if resp.status_code != 200:
+            if r.status_code != 200:
                 continue
-            for artist in resp.json().get("artists", []):
+            for artist in r.json().get("artists", []):
                 aid = str(artist.get("id") or "")
                 aname = str(artist.get("name") or "").strip()
-                if not aid or not aname or aid in seen_related:
+                if not aid or not aname:
+                    continue
+                all_first_degree_ids.append(aid)
+                if aid in seen_related:
                     continue
                 pop = int(artist.get("popularity") or 0)
                 genres = artist.get("genres") or []
@@ -496,6 +532,29 @@ class ListeningService:
                     "id": aid, "name": aname, "popularity": pop,
                     "genre": genres[0] if genres else (seed_genres[0] if seed_genres else "related"),
                 })
+
+        # Second-degree: use heard first-degree artists as seeds to go one hop further.
+        if not related and all_first_degree_ids:
+            for seed_aid in all_first_degree_ids[:5]:
+                r = self._get_request(
+                    self._RELATED_ARTISTS_URL.format(seed_aid),
+                    headers=headers,
+                    timeout=self.timeout_seconds,
+                )
+                if r.status_code != 200:
+                    continue
+                for artist in r.json().get("artists", []):
+                    aid = str(artist.get("id") or "")
+                    aname = str(artist.get("name") or "").strip()
+                    if not aid or not aname or aid in seen_related:
+                        continue
+                    pop = int(artist.get("popularity") or 0)
+                    genres = artist.get("genres") or []
+                    seen_related.add(aid)
+                    related.append({
+                        "id": aid, "name": aname, "popularity": pop,
+                        "genre": genres[0] if genres else (seed_genres[0] if seed_genres else "related"),
+                    })
 
         related.sort(key=lambda a: int(a["popularity"]))
         debug["related_artists_found"] = len(related)
@@ -506,18 +565,16 @@ class ListeningService:
             aid = str(artist_info["id"])
             aname = str(artist_info["name"])
             genre_label = str(artist_info["genre"])
-            url = self._SEARCH_URL + "?" + _urlencode({
-                "q": f'artist:"{aname}"',
-                "type": "track",
-                "limit": "20",
-            })
-            resp = self._get_request(url, headers=headers, timeout=self.timeout_seconds)
-            if resp.status_code != 200:
+            r = self._get_request(
+                self._SEARCH_URL,
+                headers=headers,
+                params={"q": f'artist:"{aname}"', "type": "track", "limit": "20"},
+                timeout=self.timeout_seconds,
+            )
+            if r.status_code != 200:
                 continue
-            for track in (resp.json().get("tracks") or {}).get("items", []):
-                track_artist_ids = {
-                    str(a.get("id") or "") for a in (track.get("artists") or [])
-                }
+            for track in (r.json().get("tracks") or {}).get("items", []):
+                track_artist_ids = {str(a.get("id") or "") for a in (track.get("artists") or [])}
                 if aid not in track_artist_ids:
                     continue
                 tid = str(track.get("id") or "")
@@ -530,11 +587,11 @@ class ListeningService:
                     pop_num = 0
                 if pop_num > popularity_max:
                     continue
-                primary_artist = (track.get("artists") or [{}])[0]
+                primary = (track.get("artists") or [{}])[0]
                 seen_track_ids.add(tid)
                 candidates.append({
                     "track": str(track.get("name") or "Unknown Track"),
-                    "artist": str(primary_artist.get("name") or aname),
+                    "artist": str(primary.get("name") or aname),
                     "popularity": pop_num,
                     "genre": genre_label,
                     "uri": str(track.get("uri") or ""),
@@ -551,74 +608,73 @@ class ListeningService:
             return result
 
         # ------------------------------------------------------------------ #
-        # Stage 5 (fallback B): Genre keyword search → artist → track        #
+        # Stage 5: Keyword artist search                                     #
+        #                                                                     #
+        # Spotify's genre:"X" filter for type=artist returns HTTP 400 on     #
+        # current API versions. Use plain keyword search instead:            #
+        # q=show tunes&type=artist, NOT q=genre:"show tunes"&type=artist.    #
         # ------------------------------------------------------------------ #
-        genre_artist_searches: List[Dict[str, object]] = []
-        track_searches: List[Dict[str, object]] = []
+        search_terms: List[str] = list(seed_genres)
+        for broad in ("musical theatre", "broadway cast recording", "anime music",
+                      "show tunes", "west end cast", "indie folk", "lo-fi beats",
+                      "j-pop", "singer songwriter", "chamber pop", "dream pop",
+                      "alternative rock", "indie pop"):
+            if broad.lower() not in {t.lower() for t in search_terms}:
+                search_terms.append(broad)
+
         discovered: List[Dict[str, object]] = []
-        seen_discovered_ids: set[str] = set(heard_artist_ids)
+        seen_discovered: set[str] = set(heard_artist_ids)
+        kw_searches: List[Dict[str, object]] = []
 
-        genres_to_search: List[tuple[str, str]] = [(g, g) for g in seed_genres]
-        for broad in ("show tunes", "original cast recording", "broadway", "indie pop",
-                      "indie folk", "chamber pop", "dream pop", "alternative rock",
-                      "folk", "singer-songwriter", "j-pop", "anime", "lo-fi"):
-            if broad.lower() not in {sg.lower() for sg in seed_genres}:
-                genres_to_search.append((broad, broad))
-
-        for genre_q, genre_label in genres_to_search:
+        for term in search_terms:
             if len(discovered) >= 60:
                 break
-            url = self._SEARCH_URL + "?" + _urlencode({
-                "q": f'genre:"{genre_q}"',
-                "type": "artist",
-                "limit": "50",
-            })
-            resp = self._get_request(url, headers=headers, timeout=self.timeout_seconds)
+            r = self._get_request(
+                self._SEARCH_URL,
+                headers=headers,
+                params={"q": term, "type": "artist", "limit": "50"},
+                timeout=self.timeout_seconds,
+            )
             entry: Dict[str, object] = {
-                "genre": genre_q, "status": int(resp.status_code),
+                "term": term, "status": int(r.status_code),
                 "total_artists": 0, "new_artists": 0,
             }
-            if resp.status_code == 200:
-                for artist in (resp.json().get("artists") or {}).get("items", []):
+            if r.status_code == 200:
+                for artist in (r.json().get("artists") or {}).get("items", []):
                     aid = str(artist.get("id") or "")
                     aname = str(artist.get("name") or "").strip()
                     if not aid or not aname:
                         continue
                     entry["total_artists"] = int(entry["total_artists"]) + 1
-                    if aid in seen_discovered_ids:
+                    if aid in seen_discovered:
                         continue
                     pop = int(artist.get("popularity") or 0)
-                    seen_discovered_ids.add(aid)
+                    seen_discovered.add(aid)
                     entry["new_artists"] = int(entry["new_artists"]) + 1
-                    discovered.append({
-                        "id": aid, "name": aname,
-                        "popularity": pop, "genre": genre_label,
-                    })
-            genre_artist_searches.append(entry)
+                    discovered.append({"id": aid, "name": aname, "popularity": pop, "genre": term})
+            kw_searches.append(entry)
 
         discovered.sort(key=lambda a: int(a["popularity"]))
         debug["artists_discovered"] = len(discovered)
+        debug["genre_artist_searches"] = kw_searches
 
+        track_searches: List[Dict[str, object]] = []
         for artist_info in discovered[:25]:
             if len(candidates) >= max_results * 8:
                 break
             aid = str(artist_info["id"])
             aname = str(artist_info["name"])
             genre_label = str(artist_info["genre"])
-            url = self._SEARCH_URL + "?" + _urlencode({
-                "q": f'artist:"{aname}"',
-                "type": "track",
-                "limit": "20",
-            })
-            resp = self._get_request(url, headers=headers, timeout=self.timeout_seconds)
-            tentry: Dict[str, object] = {
-                "artist": aname, "status": int(resp.status_code), "added": 0,
-            }
-            if resp.status_code == 200:
-                for track in (resp.json().get("tracks") or {}).get("items", []):
-                    track_artist_ids = {
-                        str(a.get("id") or "") for a in (track.get("artists") or [])
-                    }
+            r = self._get_request(
+                self._SEARCH_URL,
+                headers=headers,
+                params={"q": f'artist:"{aname}"', "type": "track", "limit": "20"},
+                timeout=self.timeout_seconds,
+            )
+            tentry: Dict[str, object] = {"artist": aname, "status": int(r.status_code), "added": 0}
+            if r.status_code == 200:
+                for track in (r.json().get("tracks") or {}).get("items", []):
+                    track_artist_ids = {str(a.get("id") or "") for a in (track.get("artists") or [])}
                     if aid not in track_artist_ids:
                         continue
                     tid = str(track.get("id") or "")
@@ -631,31 +687,29 @@ class ListeningService:
                         pop_num = 0
                     if pop_num > popularity_max:
                         continue
-                    primary_artist = (track.get("artists") or [{}])[0]
+                    primary = (track.get("artists") or [{}])[0]
                     seen_track_ids.add(tid)
                     tentry["added"] = int(tentry["added"]) + 1
                     candidates.append({
                         "track": str(track.get("name") or "Unknown Track"),
-                        "artist": str(primary_artist.get("name") or aname),
+                        "artist": str(primary.get("name") or aname),
                         "popularity": pop_num,
                         "genre": genre_label,
                         "uri": str(track.get("uri") or ""),
                     })
             track_searches.append(tentry)
 
-        debug["genre_artist_searches"] = genre_artist_searches
         debug["track_searches"] = track_searches
         debug["candidates_found"] = len(candidates)
 
         if candidates:
             candidates.sort(key=lambda r: int(r["popularity"]))
             result = candidates[:max_results]
-            debug["fallback_mode"] = "genre_artist_search"
+            debug["fallback_mode"] = "keyword_artist_search"
             debug["result_count"] = len(result)
             self._last_song_recommendation_debug[user_id] = debug
             return result
 
-        # All stages exhausted — return empty rather than surfacing library songs
         debug["fallback_mode"] = "empty"
         debug["result_count"] = 0
         self._last_song_recommendation_debug[user_id] = debug
