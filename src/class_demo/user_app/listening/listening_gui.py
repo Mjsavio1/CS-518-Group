@@ -1,4 +1,5 @@
-﻿import json
+﻿import asyncio
+import json
 
 from nicegui import ui
 
@@ -212,16 +213,23 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
     with ui.column().classes("w-full gap-4"):
         tracks_container = ui.column().classes("w-full")
 
-        def refresh_tracks() -> None:
+        async def refresh_tracks() -> None:
             if not current_user.id:
                 tracks_container.clear()
                 ui.notify("User session missing; re-login required.", type="negative")
                 return
 
+            tracks_container.clear()
+            with tracks_container:
+                with ui.row().classes("items-center gap-2"):
+                    ui.spinner("dots")
+                    ui.label("Loading top tracks…").classes("text-grey")
+
             try:
-                tracks = controller.get_top_tracks(
+                tracks = await asyncio.to_thread(
+                    controller.get_top_tracks,
                     current_user,
-                    refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                    lambda u: logic.get_decrypted_refresh_token(u, u.id),
                 )
             except Exception as exc:
                 tracks_container.clear()
@@ -304,16 +312,24 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
 
         rec_container = ui.column().classes("w-full")
 
-        def load_recommendations() -> None:
+        async def load_recommendations() -> None:
             if not current_user.id:
                 ui.notify("Cannot load recommendations: user session missing.", type="negative")
                 return
+
+            rec_container.clear()
+            with rec_container:
+                with ui.row().classes("items-center gap-2"):
+                    ui.spinner("dots", color="deep-purple")
+                    ui.label("Finding lesser-known songs…").classes("text-grey")
+
             try:
-                recs = controller.get_song_recommendations_resilient(
-                    user=current_user,
-                    refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                    max_results=10,
-                    popularity_max=65,
+                recs = await asyncio.to_thread(
+                    controller.get_song_recommendations_resilient,
+                    current_user,
+                    lambda u: logic.get_decrypted_refresh_token(u, u.id),
+                    10,
+                    65,
                 )
                 debug_info = controller.get_last_song_recommendation_debug(current_user.id)
                 rec_container.clear()
@@ -369,6 +385,7 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                             with ui.expansion("Recommendation debug details", icon="bug_report").classes("w-full mt-2"):
                                 ui.code(json.dumps(debug_info, indent=2), language="json").classes("w-full")
             except Exception as exc:
+                rec_container.clear()
                 ui.notify(str(exc), type="negative")
 
         ui.button("Get Recommendations", on_click=load_recommendations).props("icon=explore color=deep-purple")
