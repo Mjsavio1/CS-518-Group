@@ -198,9 +198,10 @@ class AppLogic(AppLogicInterface):
 
 		Returns the number of users successfully refreshed.
 		"""
-		client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-		if not client_secret:
-			self._logger.debug("SPOTIFY_CLIENT_SECRET not configured; skipping background refresh")
+		# PKCE/public-client refresh flow: do not require client_secret.
+		client_id = os.getenv("SPOTIFY_CLIENT_ID", "")
+		if not client_id:
+			self._logger.debug("SPOTIFY_CLIENT_ID not configured; skipping background refresh")
 			return 0
 
 		count = 0
@@ -233,8 +234,7 @@ class AppLogic(AppLogicInterface):
 					data={
 						"grant_type": "refresh_token",
 						"refresh_token": rt,
-						"client_id": os.getenv("SPOTIFY_CLIENT_ID", ""),
-						"client_secret": client_secret,
+						"client_id": client_id,
 					},
 					timeout=15,
 				)

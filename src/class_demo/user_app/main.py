@@ -7,7 +7,7 @@ from ..listening_service.listening_service import ListeningService
 from ..user_service.models import User
 from .interfaces import AppLogic
 from .listening.listening_controller import ListeningController
-from .listening.listening_gui import render_listening_module
+from .listening.listening_gui import render_listening_module, render_spotify_player
 from .session import SessionManager
 from .users.user_gui import render_user_module
 
@@ -167,17 +167,18 @@ def init_pages(
 
 
 def _render_dashboard(current_user: User, user_logic: AppLogic, listening_controller: ListeningController) -> None:
-    with ui.header():
+    with ui.header().classes("items-center gap-4"):
         ui.label(f"Welcome, {current_user.username}")
+        with ui.tabs().props("inline-label").classes("text-white") as tabs:
+            ui.tab("Users")
+            ui.tab("Listening History")
         ui.space()
         ui.button("Logout", on_click=lambda: [SessionManager.logout(), ui.navigate.to("/login")])
 
-    with ui.tabs() as tabs:
-        ui.tab("Users")
-        ui.tab("Listening History")
+    render_spotify_player(listening_controller, user_logic, current_user)
 
     # Keep both modules on the same page so switching tabs does not reload.
-    with ui.tab_panels(tabs, value="Users").classes("w-full"):
+    with ui.tab_panels(tabs, value="Listening History").classes("w-full"):
         with ui.tab_panel("Users"):
             render_user_module(user_logic, current_user)
 

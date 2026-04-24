@@ -329,41 +329,43 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                     current_user,
                     lambda u: logic.get_decrypted_refresh_token(u, u.id),
                     10,
-                    65,
+                    85,
                 )
                 debug_info = controller.get_last_song_recommendation_debug(current_user.id)
                 rec_container.clear()
                 with rec_container:
                     if recs:
                         for rec in recs:
-                            track_uri = rec.get("uri", "")
-                            embed_url = _spotify_embed_url(str(track_uri)) if track_uri else ""
+                            track_name = str(rec.get("track", "Unknown"))
+                            artist_name = str(rec.get("artist", "Unknown"))
 
-                            async def _play_rec(_, uri=track_uri, embed=embed_url) -> None:
+                            async def _play_rec(_, tn=track_name, an=artist_name) -> None:
                                 try:
-                                    if embed:
-                                        safe_embed = json.dumps(embed)
+                                    # Search Spotify for this iTunes-discovered song
+                                    uri = await asyncio.to_thread(
+                                        controller.search_track_uri,
+                                        current_user,
+                                        tn,
+                                        an,
+                                    )
+                                    if not uri:
+                                        if not controller.service.is_connected(current_user.id):
+                                            ui.notify("Spotify not connected — click 'Connect Spotify' at the top first.", type="warning")
+                                        else:
+                                            ui.notify(f"'{tn}' by {an} couldn't be found on Spotify.", type="warning")
+                                        return
+                                    # Load the track into the visible embed player at the top
+                                    embed_url = _spotify_embed_url(uri)
+                                    if embed_url:
+                                        safe_embed = json.dumps(embed_url)
                                         await ui.run_javascript(
                                             "var frame=document.getElementById('spotify-embed-player');"
                                             "if(frame){frame.src=" + safe_embed + ";}"
+                                            # Scroll to top so the player is visible
+                                            "window.scrollTo({top:0,behavior:'smooth'});"
                                         )
-                                    if not uri:
-                                        ui.notify("No playback URI for this track.", type="warning")
-                                        return
-                                    token = controller.get_access_token_resilient(
-                                        current_user,
-                                        refresh_callback=lambda u: logic.get_decrypted_refresh_token(u, u.id),
-                                        force_refresh=True,
-                                    )
-                                    if not token:
-                                        ui.notify("Connect Spotify first.", type="warning")
-                                        return
-                                    _inject_web_player(token)
-                                    safe_uri = json.dumps(str(uri))
-                                    await ui.run_javascript(
-                                        "window._spotifyPendingTrackUri = " + safe_uri + ";"
-                                        "if(window._spotifyPlayTrack){window._spotifyPlayTrack(" + safe_uri + ");}"
-                                    )
+                                    else:
+                                        ui.notify("Could not build Spotify embed URL.", type="warning")
                                 except Exception as exc:
                                     ui.notify(str(exc), type="negative")
 
@@ -371,11 +373,10 @@ def render_listening_module(controller: ListeningController, logic: AppLogic, cu
                                 "w-full items-center gap-4 px-3 py-2 rounded cursor-pointer "
                                 "hover:bg-purple-900 transition-colors"
                             ).on("click", _play_rec):
-                                icon_name = "play_circle" if track_uri else "music_note"
-                                ui.icon(icon_name).classes("text-purple-400 text-2xl")
+                                ui.icon("play_circle").classes("text-purple-400 text-2xl")
                                 with ui.column().classes("gap-0"):
-                                    ui.label(str(rec.get("track", "Unknown"))).classes("text-body1 font-bold")
-                                    ui.label(str(rec.get("artist", "Unknown"))).classes("text-caption text-grey")
+                                    ui.label(track_name).classes("text-body1 font-bold")
+                                    ui.label(artist_name).classes("text-caption text-grey")
                                 with ui.column().classes("gap-0 ml-auto items-end"):
                                     ui.label(f"Popularity: {rec.get('popularity', '?')}").classes("text-caption text-grey")
                                     ui.label(str(rec.get("genre", ""))).classes("text-caption text-purple-300")

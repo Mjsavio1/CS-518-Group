@@ -140,12 +140,18 @@ class ListeningController:
         """Return diagnostics from the latest song recommendation request."""
         return self.service.get_last_song_recommendation_debug(user_id)
 
+    def search_track_uri(self, user, track_name: str, artist_name: str) -> str:
+        """Search Spotify for a track URI. Returns empty string if not found or not connected."""
+        if not user or not getattr(user, "id", None):
+            return ""
+        return self.service.search_track_uri(user.id, track_name, artist_name) or ""
+
     def get_song_recommendations_resilient(
         self,
         user,
         refresh_callback=None,
         max_results: int = 10,
-        popularity_max: int = 65,
+        popularity_max: int = 85,
     ) -> List[Dict]:
         """Fetch song recommendations and retry once after token refresh when possible."""
         try:
@@ -171,7 +177,7 @@ class ListeningController:
         user,
         refresh_callback=None,
         max_results: int = 10,
-        popularity_max: int = 65,
+        popularity_max: int = 85,
     ) -> List[Dict]:
         """Backward-compatible resilient wrapper for artist recommendations."""
         try:

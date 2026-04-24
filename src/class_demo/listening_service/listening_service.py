@@ -300,7 +300,8 @@ class ListeningService:
         self,
         user_id: str,
         max_results: int = 10,
-        popularity_max: int = 65,
+        popularity_max: int = 85,
+        time_budget_seconds: float = 20.0,
     ) -> List[Dict[str, object]]:
         """Discover lesser-known songs using only endpoints available post-2024.
 
@@ -318,7 +319,15 @@ class ListeningService:
            artists who recorded the same song (covers, fan arrangements, etc.)
         6. Direct keyword track search as final fallback
         Returns [] if nothing found; never returns songs from the user's library.
+
+        time_budget_seconds caps total wall-clock time to avoid dropping the
+        WebSocket connection on long-running Azure deployments.
         """
+        import time as _time
+        _start = _time.monotonic()
+
+        def _over_budget() -> bool:
+            return (_time.monotonic() - _start) >= time_budget_seconds
         debug: Dict[str, object] = {
             "user_id": user_id,
             "max_results": max_results,
@@ -344,7 +353,7 @@ class ListeningService:
         heard_artist_names_lc: set[str] = set()
         seed_genres: List[str] = []
 
-        for time_range in ("short_term", "medium_term", "long_term"):
+        for time_range in ("medium_term", "short_term", "long_term"):
             resp = self._get_request(
                 self._TOP_ARTISTS_URL,
                 headers=headers,
@@ -354,9 +363,12 @@ class ListeningService:
             if resp.status_code == 401:
                 self._sessions.pop(user_id, None)
                 raise SpotifyConnectionError("Spotify session expired. Reconnect and try again.")
+            if resp.status_code == 429:
+                break  # rate limited — stop trying
             if resp.status_code != 200:
                 continue
-            for artist in resp.json().get("items", []):
+            items = resp.json().get("items", [])
+            for artist in items:
                 aid = str(artist.get("id") or "")
                 aname = str(artist.get("name") or "").strip()
                 if aid:
@@ -367,6 +379,8 @@ class ListeningService:
                     g = g.strip()
                     if g and g.lower() not in {s.lower() for s in seed_genres}:
                         seed_genres.append(g)
+            if items:
+                break  # got data — one time range is enough
 
         debug["seed_genres"] = seed_genres
         debug["heard_artist_count"] = len(heard_artist_ids)
@@ -379,7 +393,7 @@ class ListeningService:
         heard_track_ids: set[str] = set()
         heard_track_titles: List[str] = []
 
-        for time_range in ("short_term", "medium_term", "long_term"):
+        for time_range in ("medium_term", "short_term", "long_term"):
             resp = self._get_request(
                 self._TOP_TRACKS_URL,
                 headers=headers,
@@ -389,15 +403,28 @@ class ListeningService:
             if resp.status_code == 401:
                 self._sessions.pop(user_id, None)
                 raise SpotifyConnectionError("Spotify session expired. Reconnect and try again.")
+            if resp.status_code == 429:
+                break  # rate limited — stop trying
             if resp.status_code != 200:
                 continue
-            for item in resp.json().get("items", []):
+            items = resp.json().get("items", [])
+            for item in items:
                 tid = item.get("id")
                 if tid:
                     heard_track_ids.add(str(tid))
                 tname = str(item.get("name") or "").strip()
                 if tname and tname not in heard_track_titles:
                     heard_track_titles.append(tname)
+                # Populate heard artists from track data (top/artists may be rate-limited)
+                for a in (item.get("artists") or []):
+                    aid = str(a.get("id") or "")
+                    aname = str(a.get("name") or "").strip()
+                    if aid:
+                        heard_artist_ids.add(aid)
+                    if aname:
+                        heard_artist_names_lc.add(aname.lower())
+            if items:
+                break  # got data — one time range is enough
 
         debug["heard_track_count"] = len(heard_track_ids)
 
@@ -431,155 +458,155 @@ class ListeningService:
             })
 
         # ------------------------------------------------------------------ #
-        # Stage 3: Artist keyword search (type=artist, limit=10)             #
-        #                                                                     #
-        # /recommendations and /related-artists are discontinued (404).      #
-        # The search limit cap is now 10 — sending limit > 10 causes 400.    #
-        # Use offset pagination to collect up to 30 artists per keyword.     #
+        # Stage 3: iTunes Search API — broad, genre-diverse discovery       #
+        # Free, no auth, no rate limits. Returns tracks across any genre,   #
+        # completely independent of the user's listening history.           #
+        # Stage 1/2 data is used only to EXCLUDE already-heard artists.     #
         # ------------------------------------------------------------------ #
-        search_keywords: List[str] = list(seed_genres)
-        for broad in (
-            "musical theatre", "broadway", "show tunes", "west end",
-            "cast recording", "sondheim", "original cast", "musical",
-            "anime soundtrack", "anime ost", "j-pop", "vocaloid",
-            "indie folk", "singer songwriter", "folk acoustic",
-            "chamber pop", "dream pop", "alternative rock", "indie pop",
-            "lo-fi", "ambient", "classical crossover", "neo-classical",
-            "art pop", "experimental", "underground", "bedroom pop",
-        ):
-            if broad.lower() not in {k.lower() for k in search_keywords}:
-                search_keywords.append(broad)
+        _ITUNES_URL = "https://itunes.apple.com/search"
+        _itunes_terms = [
+            "musical theatre cast recording",
+            "anime ost soundtrack",
+            "indie folk acoustic singer",
+            "jazz piano trio",
+            "classical crossover vocal",
+            "film score cinematic",
+            "world music traditional",
+            "ambient electronic",
+            "lo-fi hip hop beats",
+            "chamber pop strings",
+            "progressive rock",
+            "folk storytelling",
+        ]
 
-        discovered_artists: List[Dict[str, object]] = []
-        seen_discovered_ids: set[str] = set(heard_artist_ids)
         artist_search_log: List[Dict[str, object]] = []
+        seen_itunes: set[str] = set()
+        itunes_found = 0
 
-        for kw in search_keywords:
-            if len(discovered_artists) >= 120:
+        for term in _itunes_terms:
+            if itunes_found >= max_results * 4 or _over_budget():
                 break
-            for offset in (0, 10, 20):
-                if len(discovered_artists) >= 120:
-                    break
-                r = self._get_request(
-                    self._SEARCH_URL,
-                    headers=headers,
+            try:
+                r_it = self._get_request(
+                    _ITUNES_URL,
                     params={
-                        "q": kw,
-                        "type": "artist",
+                        "term": term,
+                        "media": "music",
+                        "entity": "song",
                         "limit": "10",
-                        "offset": str(offset),
+                        "country": "US",
                     },
-                    timeout=self.timeout_seconds,
+                    timeout=8,
                 )
-                log_entry: Dict[str, object] = {
-                    "kw": kw, "offset": offset,
-                    "status": int(r.status_code), "new": 0,
-                }
-                if r.status_code == 200:
-                    for artist in (r.json().get("artists") or {}).get("items", []):
-                        aid = str(artist.get("id") or "")
-                        aname = str(artist.get("name") or "").strip()
-                        if not aid or not aname:
-                            continue
-                        if aid in seen_discovered_ids or aname.lower() in heard_artist_names_lc:
-                            continue
-                        genres = artist.get("genres") or []
-                        seen_discovered_ids.add(aid)
-                        log_entry["new"] = int(log_entry["new"]) + 1
-                        discovered_artists.append({
-                            "id": aid, "name": aname,
-                            "popularity": int(artist.get("popularity") or 0),
-                            "genre": genres[0] if genres else kw,
-                        })
-                artist_search_log.append(log_entry)
-                if r.status_code != 200:
-                    break  # skip pagination if the call failed
+            except Exception:
+                continue
+            log_entry: Dict[str, object] = {
+                "kw": term, "status": int(r_it.status_code), "new": 0,
+            }
+            if r_it.status_code == 200:
+                for item in r_it.json().get("results", []):
+                    artist_name = str(item.get("artistName") or "").strip()
+                    track_name = str(item.get("trackName") or "").strip()
+                    if not track_name or not artist_name:
+                        continue
+                    dedup_key = f"{artist_name.lower()}|{track_name.lower()}"
+                    if dedup_key in seen_itunes:
+                        continue
+                    if artist_name.lower() in heard_artist_names_lc:
+                        continue
+                    seen_itunes.add(dedup_key)
+                    itunes_found += 1
+                    log_entry["new"] = int(log_entry["new"]) + 1
+                    candidates.append({
+                        "track": track_name,
+                        "artist": artist_name,
+                        "popularity": 0,
+                        "genre": str(item.get("primaryGenreName") or term),
+                        "uri": "",
+                        "preview_url": str(item.get("previewUrl") or ""),
+                    })
+            artist_search_log.append(log_entry)
 
-        discovered_artists.sort(key=lambda a: int(a["popularity"]))
-        debug["artists_discovered"] = len(discovered_artists)
+        debug["artists_discovered"] = itunes_found
         debug["artist_search_log"] = artist_search_log
-
-        # ------------------------------------------------------------------ #
-        # Stage 4: Track search by each discovered artist name               #
-        # ------------------------------------------------------------------ #
-        for artist_info in discovered_artists[:40]:
-            if len(candidates) >= max_results * 6:
-                break
-            aname = str(artist_info["name"])
-            genre_label = str(artist_info["genre"])
-            r = self._get_request(
-                self._SEARCH_URL,
-                headers=headers,
-                params={"q": f'artist:"{aname}"', "type": "track", "limit": "10"},
-                timeout=self.timeout_seconds,
-            )
-            if r.status_code == 200:
-                for track in (r.json().get("tracks") or {}).get("items", []):
-                    _try_add_track(track, genre_label)
-
         debug["candidates_after_artist_tracks"] = len(candidates)
 
         # ------------------------------------------------------------------ #
-        # Stage 5: Cover / interpretation search                             #
-        #                                                                     #
-        # Search each heard track title. Less-known artists who covered the  #
-        # same song appear here — fan arrangements, indie covers, alternate   #
-        # cast recordings of the same show, etc. The primary artist filter   #
-        # in _try_add_track ensures the user's familiar version is excluded. #
-        # This is the strongest fallback for Broadway/niche-genre fans        #
-        # because it uses exactly the songs we know the user loves.          #
+        # Stage 5: iTunes cover / title search (fallback if few results)    #
+        # Search each heard track title via iTunes to find lesser-known      #
+        # artists who recorded the same song. Zero Spotify calls.            #
         # ------------------------------------------------------------------ #
-        if len(candidates) < max_results * 2:
-            for title in heard_track_titles[:30]:
-                if len(candidates) >= max_results * 6:
+        if len(candidates) < max_results * 2 and not _over_budget():
+            for title in heard_track_titles[:5]:
+                if len(candidates) >= max_results * 6 or _over_budget():
                     break
-                # Strip parentheticals like "(Reprise)" for broader matches
                 clean = title.split("(")[0].split("[")[0].strip()
                 if len(clean) < 4:
                     continue
-                r = self._get_request(
-                    self._SEARCH_URL,
-                    headers=headers,
-                    params={"q": clean, "type": "track", "limit": "10"},
-                    timeout=self.timeout_seconds,
-                )
-                if r.status_code == 200:
-                    for track in (r.json().get("tracks") or {}).get("items", []):
-                        _try_add_track(track, "cover / interpretation")
+                try:
+                    r_it = self._get_request(
+                        _ITUNES_URL,
+                        params={"term": clean, "media": "music", "entity": "song", "limit": "10", "country": "US"},
+                        timeout=8,
+                    )
+                except Exception:
+                    continue
+                if r_it.status_code == 200:
+                    for item in r_it.json().get("results", []):
+                        aname = str(item.get("artistName") or "").strip()
+                        tname = str(item.get("trackName") or "").strip()
+                        if not aname or not tname or aname.lower() in heard_artist_names_lc:
+                            continue
+                        dk = f"{aname.lower()}|{tname.lower()}"
+                        if dk in seen_itunes:
+                            continue
+                        seen_itunes.add(dk)
+                        candidates.append({
+                            "track": tname, "artist": aname, "popularity": 0,
+                            "genre": str(item.get("primaryGenreName") or "cover"),
+                            "uri": "", "preview_url": str(item.get("previewUrl") or ""),
+                        })
 
         debug["candidates_after_covers"] = len(candidates)
 
         # ------------------------------------------------------------------ #
-        # Stage 6: Direct keyword track search (last resort)                 #
+        # Stage 6: iTunes genre keyword search (last resort)                 #
         # ------------------------------------------------------------------ #
-        if len(candidates) < max_results:
-            direct_queries = [
-                "original cast recording",
-                "original broadway cast",
-                "original london cast",
-                "world premiere cast recording",
-                "musical theatre",
-                "anime ost",
-                "anime soundtrack",
-                "lo-fi jazz",
-                "indie folk acoustic",
-                "chamber music vocal",
-                "art song recital",
+        if len(candidates) < max_results and not _over_budget():
+            extra_terms = [
+                "showtunes broadway", "anime opening ending song",
+                "lo-fi beats study", "indie folk ballad", "world music fusion",
+                "jazz vocal standards", "acoustic guitar instrumental",
             ]
-            for q in direct_queries:
-                if len(candidates) >= max_results * 3:
+            for q in extra_terms:
+                if len(candidates) >= max_results * 3 or _over_budget():
                     break
-                r = self._get_request(
-                    self._SEARCH_URL,
-                    headers=headers,
-                    params={"q": q, "type": "track", "limit": "10"},
-                    timeout=self.timeout_seconds,
-                )
-                if r.status_code == 200:
-                    for track in (r.json().get("tracks") or {}).get("items", []):
-                        _try_add_track(track, q)
+                try:
+                    r_it = self._get_request(
+                        _ITUNES_URL,
+                        params={"term": q, "media": "music", "entity": "song", "limit": "10", "country": "US"},
+                        timeout=8,
+                    )
+                except Exception:
+                    continue
+                if r_it.status_code == 200:
+                    for item in r_it.json().get("results", []):
+                        aname = str(item.get("artistName") or "").strip()
+                        tname = str(item.get("trackName") or "").strip()
+                        if not aname or not tname or aname.lower() in heard_artist_names_lc:
+                            continue
+                        dk = f"{aname.lower()}|{tname.lower()}"
+                        if dk in seen_itunes:
+                            continue
+                        seen_itunes.add(dk)
+                        candidates.append({
+                            "track": tname, "artist": aname, "popularity": 0,
+                            "genre": str(item.get("primaryGenreName") or q),
+                            "uri": "", "preview_url": str(item.get("previewUrl") or ""),
+                        })
 
         debug["candidates_found"] = len(candidates)
+        debug["elapsed_seconds"] = round(_time.monotonic() - _start, 2)
         debug["track_searches"] = []  # schema compat with old debug consumers
 
         if candidates:
@@ -594,6 +621,73 @@ class ListeningService:
         debug["result_count"] = 0
         self._last_song_recommendation_debug[user_id] = debug
         return []
+
+    def search_track_uri(self, user_id: str, track_name: str, artist_name: str) -> Optional[str]:
+        """Search Spotify for a track by name + artist and return its URI, or None.
+
+        Tries progressively looser queries to handle special characters in iTunes titles.
+        """
+        import re as _re
+
+        if not self.is_connected(user_id):
+            return None
+        token = str(self._sessions[user_id]["access_token"])
+        headers = {"Authorization": f"Bearer {token}"}
+
+        def _norm(s: str) -> str:
+            """Normalize Unicode apostrophes/quotes to ASCII."""
+            return s.replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'")
+
+        def _bare(s: str) -> str:
+            """Remove all apostrophes and strip extra whitespace."""
+            return _re.sub(r"['\u2018\u2019\u02bc]", "", s).strip()
+
+        track = _norm(track_name)
+        artist = _norm(artist_name)
+        # Strip parentheticals for cleaner matching
+        clean_track = track.split("(")[0].split("[")[0].strip()
+        clean_artist = artist.split("(")[0].split("[")[0].strip()
+        bare_track = _bare(clean_track)
+        bare_artist = _bare(clean_artist)
+
+        # Build queries from most specific to loosest; avoid quoted syntax (breaks on apostrophes)
+        raw_queries = [
+            f"{clean_track} {clean_artist}",
+            f"{bare_track} {bare_artist}",
+            clean_track,
+            bare_track,
+            f"{track} {artist}",
+            track_name,
+        ]
+        # Deduplicate while preserving order, skip blanks
+        seen_q: set = set()
+        queries = []
+        for q in raw_queries:
+            q = q.strip()
+            if q and q not in seen_q:
+                seen_q.add(q)
+                queries.append(q)
+
+        for q in queries:
+            try:
+                r = self._get_request(
+                    self._SEARCH_URL,
+                    headers=headers,
+                    params={"q": q, "type": "track", "limit": "3"},
+                    timeout=self.timeout_seconds,
+                )
+                if r.status_code == 200:
+                    items = (r.json().get("tracks") or {}).get("items", [])
+                    for item in items:
+                        uri = item.get("uri") or ""
+                        if uri:
+                            return str(uri)
+                elif r.status_code == 401:
+                    self._sessions.pop(user_id, None)
+                    return None
+            except Exception:
+                continue
+        return None
 
     def get_artist_recommendations(
         self,
