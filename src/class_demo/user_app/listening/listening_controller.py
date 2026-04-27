@@ -1,7 +1,7 @@
 from typing import List, Dict
 import requests
 
-from ...listening_service.listening_service import ListeningService
+from ...listening_service.listening_service import ListeningService, SpotifyRateLimitError  # noqa: F401
 
 
 class ListeningController:
@@ -173,6 +173,7 @@ class ListeningController:
         refresh_callback=None,
         max_results: int = 10,
         popularity_max: int = 85,
+        time_budget_seconds: float = 25.0,
     ) -> List[Dict]:
         """Fetch song recommendations and retry once after token refresh when possible."""
         try:
@@ -180,6 +181,7 @@ class ListeningController:
                 user_id=user.id,
                 max_results=max_results,
                 popularity_max=popularity_max,
+                time_budget_seconds=time_budget_seconds,
             )
         except Exception:
             if refresh_callback and user and getattr(user, "spotify_refresh_token", None):
@@ -190,6 +192,7 @@ class ListeningController:
                         user_id=user.id,
                         max_results=max_results,
                         popularity_max=popularity_max,
+                        time_budget_seconds=time_budget_seconds,
                     )
             raise
 

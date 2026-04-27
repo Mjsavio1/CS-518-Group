@@ -1,14 +1,18 @@
 import os
 from pathlib import Path
-from nicegui import ui
+from nicegui import ui, app as nicegui_app
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from class_demo.user_service.service import UserService
 from class_demo.user_service.repository import UserRepository
 from class_demo.user_app.main import init_pages
 from class_demo.user_app.logic import AppLogic
+from version import APP_VERSION
 
 load_dotenv()
+
+# Serve static assets (logo, etc.)
+nicegui_app.add_static_files('/static', Path(__file__).parent / 'static')
 
 # Initialize DB connection
 mongo_uri = os.getenv("MONGODB_URI")
@@ -38,7 +42,7 @@ def run_ui() -> None:
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8080")),
         title="Nichetify",
-        favicon=Path(__file__).parent / "static" / "icon.png",
+        favicon=f"/static/icon.png?v={APP_VERSION}",
         storage_secret=os.getenv("STORAGE_SECRET", os.urandom(24).hex()),
         show=False,
     )

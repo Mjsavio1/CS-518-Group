@@ -6,6 +6,12 @@ from class_demo.user_service.models import User
 
 
 class _FakeElement:
+    def timer(self, *args, **kwargs): return self
+    def icon(self, *args, **kwargs): return self
+    def spinner(self, *args, **kwargs): return self
+    def badge(self, *args, **kwargs): return self
+    def html(self, *args, **kwargs): return self
+    def card(self, *args, **kwargs): return self
     def __init__(self, value=None):
         self.value = value
         self.text = None
@@ -27,6 +33,15 @@ class _FakeElement:
     def clear(self):
         return None
 
+    def set_visibility(self, _value):
+        return self
+
+    def on(self, *_args, **_kwargs):
+        return self
+
+    def open(self):
+        return self
+
     def __enter__(self):
         return self
 
@@ -43,12 +58,23 @@ class _FakeNavigate:
 
 
 class _FakeUI:
+    def card(self, *args, **kwargs): return _FakeElement()
+    def timer(self, *args, **kwargs): return _FakeElement()
+    def run_javascript(self, *args, **kwargs): pass
+    def icon(self, *args, **kwargs): return _FakeElement()
+    def spinner(self, *args, **kwargs): return _FakeElement()
+    def badge(self, *args, **kwargs): return _FakeElement()
+    def html(self, *args, **kwargs): return _FakeElement()
+    def slider(self, *args, **kwargs): return _FakeElement()
     def __init__(self):
         self.buttons = {}
         self.notifications = []
         self.navigate = _FakeNavigate()
 
     def column(self):
+        return _FakeElement()
+
+    def expansion(self, *_args, **_kwargs):
         return _FakeElement()
 
     def row(self):
@@ -71,8 +97,10 @@ class _FakeUI:
     def switch(self, _label, value=False):
         return _FakeElement(value=value)
 
-    def button(self, label, on_click):
-        self.buttons[label] = on_click
+    def button(self, *args, on_click=None, **kwargs):
+        label = args[0] if args else kwargs.get("label")
+        if label is not None and on_click is not None:
+            self.buttons[label] = on_click
         return _FakeElement()
 
     def separator(self):
@@ -102,7 +130,7 @@ def test_connect_spotify_button_generates_and_opens_link(monkeypatch):
         password="password123",
     )
 
-    listening_gui.render_listening_module(controller, logic, current_user)
+    listening_gui.render_spotify_player(controller, logic, current_user)
 
     fake_ui.buttons["Connect Spotify"]()
 

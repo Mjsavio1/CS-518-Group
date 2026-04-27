@@ -7,6 +7,8 @@ try:
 except ImportError:
     APP_VERSION = "dev"
 
+ICON_SRC = f"/static/icon.png?v={APP_VERSION}"
+
 from ..listening_service.listening_service import ListeningService
 from ..user_service.models import User
 from .interfaces import AppLogic
@@ -41,6 +43,19 @@ def _apply_theme() -> None:
                 background: #000000 !important;
                 color: #dcfce7 !important;
             }
+
+            /* Prevent text cursor from appearing on non-editable elements */
+            *:not(input):not(textarea):not([contenteditable="true"]) {
+                cursor: default;
+            }
+            button,
+            [role="button"],
+            .q-btn,
+            .q-item,
+            a,
+            [onclick] {
+                cursor: pointer !important;
+            }
         </style>
         """
     )
@@ -56,6 +71,9 @@ def init_pages(
     def login_page():
         _apply_theme()
         with ui.card().classes("absolute-center w-80"):
+            with ui.row().classes("items-center gap-3 mb-2"):
+                ui.image(ICON_SRC).classes("w-10 h-10")
+                ui.label("Nichetify").classes("text-h5 font-bold text-primary")
             ui.label("User Authentication").classes("text-h6")
             user_input = ui.input("Username/Email")
             pass_input = ui.input("Password", password=True)
@@ -75,7 +93,11 @@ def init_pages(
 
     @ui.page("/signup")
     def signup_page():
+        _apply_theme()
         with ui.card().classes("absolute-center w-96"):
+            with ui.row().classes("items-center gap-3 mb-2"):
+                ui.image(ICON_SRC).classes("w-10 h-10")
+                ui.label("Nichetify").classes("text-h5 font-bold text-primary")
             ui.label("Create Account").classes("text-h6")
             email_input = ui.input("Email")
             username_input = ui.input("Username")
@@ -122,6 +144,7 @@ def init_pages(
 
     @ui.page("/callback")
     def spotify_callback_page(code: str | None = None, state: str | None = None, error: str | None = None):
+        _apply_theme()
         if not SessionManager.is_authenticated():
             ui.notify("Please log in before connecting Spotify.", type="negative")
             return ui.navigate.to("/login")
@@ -132,7 +155,9 @@ def init_pages(
             return ui.navigate.to("/login")
 
         with ui.card().classes("absolute-center w-[40rem]"):
-            ui.label("Spotify Connection").classes("text-h6")
+            with ui.row().classes("items-center gap-3 mb-2"):
+                ui.image(ICON_SRC).classes("w-10 h-10")
+                ui.label("Spotify Connection").classes("text-h6")
             try:
                 result = listening_controller.complete_secure_connection_from_params(
                     user_id=current_user.id,
@@ -172,6 +197,7 @@ def init_pages(
 
 def _render_dashboard(current_user: User, user_logic: AppLogic, listening_controller: ListeningController) -> None:
     with ui.header().classes("items-center gap-4"):
+        ui.image(ICON_SRC).classes("w-14 h-14 p-2 rounded-full shadow-sm").style("background: #1d1d1d;").on("click", lambda: ui.navigate.to("/"))
         ui.label(f"Welcome, {current_user.username}")
         with ui.tabs().props("inline-label").classes("text-white") as tabs:
             ui.tab("Users")
