@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
@@ -52,7 +55,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          coverage run -m pytest \
+          python -m coverage run -m pytest \
             tests/user_service/test_service_unit.py \
             tests/user_api/test_api_unit.py \
             tests/listening/test_spotify_connection_safety.py \
@@ -61,7 +64,7 @@ jobs:
             -v
 
       - name: Generate coverage report
-        run: coverage xml
+        run: python -m coverage xml
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
